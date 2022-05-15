@@ -23,6 +23,8 @@ from openbb_terminal.helper_funcs import (
     parse_known_args_and_warn,
     valid_date,
 )
+from openbb_terminal.helper_classes import AllowArgsWithWhiteSpace
+from openbb_terminal.helper_funcs import choice_check_after_action
 from openbb_terminal.menu import session
 from openbb_terminal.parent_classes import StockBaseController
 from openbb_terminal.rich_config import console
@@ -62,6 +64,7 @@ class StocksController(StockBaseController):
         "dd",
         "ca",
         "options",
+        "th",
     ]
 
     PATH = "/stocks/"
@@ -91,6 +94,9 @@ class StocksController(StockBaseController):
             choices["search"]["-e"] = {
                 c: None for c in stocks_helper.market_coverage_suffix
             }
+
+            choices["support"] = self.SUPPORT_CHOICES
+
             self.completer = NestedCompleter.from_nested_dict(choices)
 
     def print_help(self):
@@ -116,6 +122,7 @@ Stock: [/param]{stock_text}
     codes       FIGI, SIK and SIC codes codes[/cmds] [src][Polygon.io][/src]
 
 [menu]
+>   th          trading hours, \t\t\t check open markets
 >   options     options menu,  \t\t\t e.g.: chains, open interest, greeks, parity
 >   disc        discover trending stocks, \t e.g.: map, sectors, high short interest
 >   sia         sector and industry analysis, \t e.g.: companies per sector, quick ratio per industry and country
@@ -176,7 +183,8 @@ Stock: [/param]{stock_text}
             "-c",
             "--country",
             default="",
-            choices=self.country,
+            nargs=argparse.ONE_OR_MORE,
+            action=choice_check_after_action(AllowArgsWithWhiteSpace, self.country),
             dest="country",
             help="Search by country to find stocks matching the criteria.",
         )
@@ -184,7 +192,8 @@ Stock: [/param]{stock_text}
             "-s",
             "--sector",
             default="",
-            choices=self.sector,
+            nargs=argparse.ONE_OR_MORE,
+            action=choice_check_after_action(AllowArgsWithWhiteSpace, self.sector),
             dest="sector",
             help="Search by sector to find stocks matching the criteria.",
         )
@@ -192,7 +201,8 @@ Stock: [/param]{stock_text}
             "-i",
             "--industry",
             default="",
-            choices=self.industry,
+            nargs=argparse.ONE_OR_MORE,
+            action=choice_check_after_action(AllowArgsWithWhiteSpace, self.industry),
             dest="industry",
             help="Search by industry to find stocks matching the criteria.",
         )
@@ -505,6 +515,15 @@ Stock: [/param]{stock_text}
         )
 
         self.queue = self.load_class(OptionsController, self.ticker, self.queue)
+
+    @log_start_end(log=logger)
+    def call_th(self, _):
+        """Process th command"""
+        from openbb_terminal.stocks.tradinghours.tradinghours_controller import (
+            TradingHoursController,
+        )
+
+        self.queue = self.load_class(TradingHoursController, self.queue)
 
     @log_start_end(log=logger)
     def call_res(self, _):
