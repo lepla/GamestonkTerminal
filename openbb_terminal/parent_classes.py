@@ -14,6 +14,8 @@ from typing import Union, List, Dict, Any
 from datetime import datetime, timedelta
 
 from prompt_toolkit.completion import NestedCompleter
+from prompt_toolkit.styles import Style
+from prompt_toolkit.formatted_text import HTML
 from rich.markdown import Markdown
 import pandas as pd
 import numpy as np
@@ -27,7 +29,6 @@ from openbb_terminal.helper_funcs import (
     get_flair,
     valid_date,
     parse_known_args_and_warn,
-    valid_date_in_past,
     set_command_location,
     prefill_form,
     support_message,
@@ -36,7 +37,6 @@ from openbb_terminal.config_terminal import theme
 from openbb_terminal.rich_config import console
 from openbb_terminal.stocks import stocks_helper
 from openbb_terminal.cryptocurrency import cryptocurrency_helpers
-from openbb_terminal.cryptocurrency.pycoingecko_helpers import calc_change
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +76,7 @@ class BaseController(metaclass=ABCMeta):
     SUPPORT_CHOICES: Dict = {}
     COMMAND_SEPARATOR = "/"
     KEYS_MENU = "keys" + COMMAND_SEPARATOR
-
+    TRY_RELOAD = False
     PATH: str = ""
     FILE_PATH: str = ""
 
@@ -163,7 +163,7 @@ class BaseController(metaclass=ABCMeta):
 
     @abstractmethod
     def print_help(self) -> None:
-        raise NotImplementedError("Must override print_help")
+        raise NotImplementedError("Must override print_help.")
 
     def contains_keys(self, string_to_check: str) -> bool:
         if self.KEYS_MENU in string_to_check or self.KEYS_MENU in self.PATH:
@@ -411,11 +411,31 @@ class BaseController(metaclass=ABCMeta):
                 try:
                     # Get input from user using auto-completion
                     if session and obbff.USE_PROMPT_TOOLKIT:
-                        an_input = session.prompt(
-                            f"{get_flair()} {self.PATH} $ ",
-                            completer=self.completer,
-                            search_ignore_case=True,
-                        )
+                        if bool(obbff.TOOLBAR_HINT):
+                            an_input = session.prompt(
+                                f"{get_flair()} {self.PATH} $ ",
+                                completer=self.completer,
+                                search_ignore_case=True,
+                                bottom_toolbar=HTML(
+                                    '<style bg="ansiblack" fg="ansiwhite">[h]</style> help menu    '
+                                    '<style bg="ansiblack" fg="ansiwhite">[q]</style> return to previous menu    '
+                                    '<style bg="ansiblack" fg="ansiwhite">[e]</style> exit terminal    '
+                                    '<style bg="ansiblack" fg="ansiwhite">[cmd -h]</style>'
+                                    ' see usage and available options         <style bg="#0000EE">'
+                                    f"https://openbb-finance.github.io/OpenBBTerminal/terminal{self.PATH}</style>"
+                                ),
+                                style=Style.from_dict(
+                                    {
+                                        "bottom-toolbar": "#ffffff bg:#333333",
+                                    }
+                                ),
+                            )
+                        else:
+                            an_input = session.prompt(
+                                f"{get_flair()} {self.PATH} $ ",
+                                completer=self.completer,
+                                search_ignore_case=True,
+                            )
                     # Get input from user without auto-completion
                     else:
                         an_input = input(f"{get_flair()} {self.PATH} $ ")
@@ -462,7 +482,7 @@ class BaseController(metaclass=ABCMeta):
                     console.print(f" Replacing by '{an_input}'.")
                     self.queue.insert(0, an_input)
                 else:
-                    if "load" in self.controller_choices:
+                    if self.TRY_RELOAD and obbff.RETRY_WITH_LOAD:
                         console.print(f"Trying `load {an_input}`")
                         self.queue.insert(0, "load " + an_input)
                     console.print("")
@@ -480,6 +500,7 @@ class StockBaseController(BaseController, metaclass=ABCMeta):
         self.start = ""
         self.suffix = ""  # To hold suffix for Yahoo Finance
         self.add_info = stocks_helper.additional_info_about_ticker("")
+        self.TRY_RELOAD = True
 
     def call_load(self, other_args: List[str]):
         """Process load command"""
@@ -628,7 +649,11 @@ class StockBaseController(BaseController, metaclass=ABCMeta):
                     ns_parser.ticker
                 )
                 console.print(self.add_info)
-                if ns_parser.interval == 1440 and ns_parser.filepath is None:
+                if (
+                    ns_parser.interval == 1440
+                    and ns_parser.filepath is None
+                    and self.PATH == "/stocks/"
+                ):
                     stocks_helper.show_quick_performance(self.stock, ns_parser.ticker)
                 if "." in ns_parser.ticker:
                     self.ticker, self.suffix = ns_parser.ticker.upper().split(".")
@@ -665,11 +690,10 @@ class CryptoBaseController(BaseController, metaclass=ABCMeta):
         self.current_df = pd.DataFrame()
         self.current_currency = ""
         self.source = ""
-        self.coin_map_df = pd.DataFrame()
         self.current_interval = ""
         self.price_str = ""
         self.resolution = "1D"
-        self.coin = ""
+        self.TRY_RELOAD = True
 
     def call_load(self, other_args):
         """Process load command"""
@@ -678,32 +702,24 @@ class CryptoBaseController(BaseController, metaclass=ABCMeta):
             formatter_class=argparse.ArgumentDefaultsHelpFormatter,
             prog="load",
             description="Load crypto currency to perform analysis on."
-            "Available data sources are CoinGecko, CoinPaprika, Binance, Coinbase"
-            "By default main source used for analysis is CoinGecko (cg). To change it use --source flag",
+            "CoinGecko is used as source for price and YahooFinance for volume.",
         )
         parser.add_argument(
             "-c",
             "--coin",
-            help="Coin to get",
+            help="Coin to get. Must be coin symbol (e.g., btc, eth)",
             dest="coin",
             type=str,
             required="-h" not in other_args,
         )
+
         parser.add_argument(
-            "--source",
-            help="Source of data",
-            dest="source",
-            choices=("cp", "cg", "bin", "cb", "yf"),
-            default="cp",
-            required=False,
-        )
-        parser.add_argument(
-            "-s",
-            "--start",
-            type=valid_date_in_past,
-            default=(datetime.now() - timedelta(days=366)).strftime("%Y-%m-%d"),
-            dest="start",
-            help="The starting date (format YYYY-MM-DD) of the crypto",
+            "-d",
+            "--days",
+            default="365",
+            dest="days",
+            help="Data up to number of days ago",
+            choices=["1", "7", "14", "30", "90", "180", "365"],
         )
         parser.add_argument(
             "--vs",
@@ -711,14 +727,7 @@ class CryptoBaseController(BaseController, metaclass=ABCMeta):
             dest="vs",
             default="usd",
             type=str,
-        )
-        parser.add_argument(
-            "-i",
-            "--interval",
-            help="Interval to get data (Only available on binance/coinbase)",
-            dest="interval",
-            default="1day",
-            type=str,
+            choices=["usd", "eur"],
         )
 
         if other_args and "-" not in other_args[0][0]:
@@ -727,61 +736,19 @@ class CryptoBaseController(BaseController, metaclass=ABCMeta):
         ns_parser = parse_known_args_and_warn(parser, other_args)
 
         if ns_parser:
-            delta = (datetime.now() - ns_parser.start).days
-            source = ns_parser.source
-            for arg in ["--source", source]:
-                if arg in other_args:
-                    other_args.remove(arg)
-
-            res = ns_parser.resolution if delta < 90 else "1D"
-            self.resolution = res
-
-            # TODO: protections in case None is returned
-            (
-                self.coin,
-                self.source,
-                self.symbol,
-                self.coin_map_df,
-                self.current_df,
-                self.current_currency,
-            ) = cryptocurrency_helpers.load(
-                coin=ns_parser.coin,
-                source=ns_parser.source,
-                should_load_ta_data=True,
-                days=delta,
-                interval=ns_parser.interval,
+            (self.current_df) = cryptocurrency_helpers.load(
+                symbol_search=ns_parser.coin.lower(),
+                days=int(ns_parser.days),
                 vs=ns_parser.vs,
             )
-            if (
-                self.symbol
-                and self.current_df is not None
-                and not self.current_df.empty
-            ):
-                self.current_interval = ns_parser.interval
-                first_price = self.current_df["Close"].iloc[0]
-                last_price = self.current_df["Close"].iloc[-1]
-                second_last_price = self.current_df["Close"].iloc[-2]
-                interval_change = calc_change(last_price, second_last_price)
-                since_start_change = calc_change(last_price, first_price)
-                if isinstance(self.current_currency, str) and self.PATH == "/crypto/":
-                    col1 = "green" if interval_change > 0 else "red"
-                    col2 = "green" if since_start_change > 0 else "red"
-                    self.price_str = f"""Current Price: {round(last_price,2)} {self.current_currency.upper()}
-Performance in interval ({self.current_interval}): [{col1}]{round(interval_change,2)}%[/{col1}]
-Performance since {ns_parser.start.strftime('%Y-%m-%d')}: [{col2}]{round(since_start_change,2)}%[/{col2}]"""  # noqa
-
-                    console.print(
-                        f"""
-Loaded {self.coin} against {self.current_currency} from {CRYPTO_SOURCES[self.source]} source
-
-{self.price_str}
-"""
-                    )  # noqa
-                else:
-                    console.print(
-                        f"{delta} Days of {self.coin} vs {self.current_currency} loaded with {res} resolution.\n"
-                    )
+            if not self.current_df.empty:
+                self.current_interval = "1day"
+                self.current_currency = ns_parser.vs
+                self.symbol = ns_parser.coin.lower()
+                cryptocurrency_helpers.show_quick_performance(
+                    self.current_df, self.symbol, self.current_currency
+                )
             else:
                 console.print(
-                    f"\n[red]Could not find [bold]{ns_parser.coin}[/bold] in [bold]{CRYPTO_SOURCES[ns_parser.source]}[/bold]. Make sure you search for symbol (e.g., btc) or try another source[/red]\n"  # noqa: E501
+                    f"\n[red]Could not find [bold]{ns_parser.coin}[/bold] in [bold]CoinGecko[/bold]. Make sure you search for symbol (e.g., btc) and not full name (e.g., bitcoin)[/red]\n"  # noqa: E501
                 )
