@@ -7,8 +7,10 @@ import logging
 from datetime import datetime
 from typing import List
 
+import numpy as np
 import pandas as pd
-from prompt_toolkit.completion import NestedCompleter
+
+from openbb_terminal.custom_prompt_toolkit import NestedCompleter
 
 from openbb_terminal import feature_flags as obbff
 from openbb_terminal.common.technical_analysis import (
@@ -18,12 +20,14 @@ from openbb_terminal.common.technical_analysis import (
     trend_indicators_view,
     volatility_view,
     volume_view,
+    volatility_model,
 )
 from openbb_terminal.decorators import log_start_end
 from openbb_terminal.helper_funcs import (
     EXPORT_BOTH_RAW_DATA_AND_FIGURES,
     check_positive,
     check_positive_list,
+    check_positive_float,
     valid_date,
 )
 from openbb_terminal.forex.forex_helper import FOREX_SOURCES
@@ -55,6 +59,7 @@ class TechnicalAnalysisController(StockBaseController):
     ]
 
     PATH = "/forex/ta/"
+    CHOICES_GENERATION = True
 
     def __init__(
         self,
@@ -76,9 +81,7 @@ class TechnicalAnalysisController(StockBaseController):
         self.data["Adj Close"] = data["Close"]
 
         if session and obbff.USE_PROMPT_TOOLKIT:
-            choices: dict = {c: {} for c in self.controller_choices}
-
-            choices["support"] = self.SUPPORT_CHOICES
+            choices: dict = self.choices_default
 
             self.completer = NestedCompleter.from_nested_dict(choices)
 
@@ -169,9 +172,9 @@ class TechnicalAnalysisController(StockBaseController):
         if ns_parser:
             overlap_view.view_ma(
                 ma_type="EMA",
-                s_ticker=self.ticker,
-                series=self.data["Close"],
-                length=ns_parser.n_length,
+                symbol=self.ticker,
+                data=self.data["Close"],
+                window=ns_parser.n_length,
                 offset=ns_parser.n_offset,
                 export=ns_parser.export,
             )
@@ -222,9 +225,9 @@ class TechnicalAnalysisController(StockBaseController):
         if ns_parser:
             overlap_view.view_ma(
                 ma_type="SMA",
-                s_ticker=self.ticker,
-                series=self.data["Close"],
-                length=ns_parser.n_length,
+                symbol=self.ticker,
+                data=self.data["Close"],
+                window=ns_parser.n_length,
                 offset=ns_parser.n_offset,
                 export=ns_parser.export,
             )
@@ -276,9 +279,9 @@ class TechnicalAnalysisController(StockBaseController):
         if ns_parser:
             overlap_view.view_ma(
                 ma_type="ZLMA",
-                s_ticker=self.ticker,
-                series=self.data["Close"],
-                length=ns_parser.n_length,
+                symbol=self.ticker,
+                data=self.data["Close"],
+                window=ns_parser.n_length,
                 offset=ns_parser.n_offset,
                 export=ns_parser.export,
             )
@@ -324,9 +327,9 @@ class TechnicalAnalysisController(StockBaseController):
         )
         if ns_parser:
             momentum_view.display_cci(
-                s_ticker=self.ticker,
-                ohlc=self.data,
-                length=ns_parser.n_length,
+                symbol=self.ticker,
+                data=self.data,
+                window=ns_parser.n_length,
                 scalar=ns_parser.n_scalar,
                 export=ns_parser.export,
             )
@@ -351,7 +354,6 @@ class TechnicalAnalysisController(StockBaseController):
             """,
         )
         parser.add_argument(
-            "-f",
             "--fast",
             action="store",
             dest="n_fast",
@@ -360,7 +362,6 @@ class TechnicalAnalysisController(StockBaseController):
             help="The short period.",
         )
         parser.add_argument(
-            "-s",
             "--slow",
             action="store",
             dest="n_slow",
@@ -382,8 +383,8 @@ class TechnicalAnalysisController(StockBaseController):
         )
         if ns_parser:
             momentum_view.display_macd(
-                s_ticker=self.ticker,
-                series=self.data["Adj Close"],
+                symbol=self.ticker,
+                data=self.data["Adj Close"],
                 n_fast=ns_parser.n_fast,
                 n_slow=ns_parser.n_slow,
                 n_signal=ns_parser.n_signal,
@@ -442,9 +443,9 @@ class TechnicalAnalysisController(StockBaseController):
         )
         if ns_parser:
             momentum_view.display_rsi(
-                s_ticker=self.ticker,
-                series=self.data["Adj Close"],
-                length=ns_parser.n_length,
+                symbol=self.ticker,
+                data=self.data["Adj Close"],
+                window=ns_parser.n_length,
                 scalar=ns_parser.n_scalar,
                 drift=ns_parser.n_drift,
                 export=ns_parser.export,
@@ -498,8 +499,8 @@ class TechnicalAnalysisController(StockBaseController):
         )
         if ns_parser:
             momentum_view.display_stoch(
-                s_ticker=self.ticker,
-                ohlc=self.data,
+                symbol=self.ticker,
+                data=self.data,
                 fastkperiod=ns_parser.n_fastkperiod,
                 slowdperiod=ns_parser.n_slowdperiod,
                 slowkperiod=ns_parser.n_slowkperiod,
@@ -539,9 +540,9 @@ class TechnicalAnalysisController(StockBaseController):
         )
         if ns_parser:
             momentum_view.display_fisher(
-                s_ticker=self.ticker,
-                ohlc=self.data,
-                length=ns_parser.n_length,
+                symbol=self.ticker,
+                data=self.data,
+                window=ns_parser.n_length,
                 export=ns_parser.export,
             )
 
@@ -578,9 +579,9 @@ class TechnicalAnalysisController(StockBaseController):
         )
         if ns_parser:
             momentum_view.display_cg(
-                s_ticker=self.ticker,
-                series=self.data["Adj Close"],
-                length=ns_parser.n_length,
+                symbol=self.ticker,
+                data=self.data["Adj Close"],
+                window=ns_parser.n_length,
                 export=ns_parser.export,
             )
 
@@ -633,9 +634,9 @@ class TechnicalAnalysisController(StockBaseController):
         )
         if ns_parser:
             trend_indicators_view.display_adx(
-                s_ticker=self.ticker,
-                ohlc=self.data,
-                length=ns_parser.n_length,
+                symbol=self.ticker,
+                data=self.data,
+                window=ns_parser.n_length,
                 scalar=ns_parser.n_scalar,
                 drift=ns_parser.n_drift,
                 export=ns_parser.export,
@@ -697,9 +698,9 @@ class TechnicalAnalysisController(StockBaseController):
         )
         if ns_parser:
             trend_indicators_view.display_aroon(
-                s_ticker=self.ticker,
-                ohlc=self.data,
-                length=ns_parser.n_length,
+                symbol=self.ticker,
+                data=self.data,
+                window=ns_parser.n_length,
                 scalar=ns_parser.n_scalar,
                 export=ns_parser.export,
             )
@@ -740,9 +741,11 @@ class TechnicalAnalysisController(StockBaseController):
             "--std",
             action="store",
             dest="n_std",
-            type=check_positive,
+            type=check_positive_float,
             default=2,
             help="std",
+            choices=np.arange(0.0, 10, 0.25).tolist(),
+            metavar="N_STD",
         )
 
         parser.add_argument(
@@ -751,6 +754,7 @@ class TechnicalAnalysisController(StockBaseController):
             action="store",
             dest="s_mamode",
             default="sma",
+            choices=volatility_model.MAMODES,
             help="mamode",
         )
 
@@ -759,9 +763,9 @@ class TechnicalAnalysisController(StockBaseController):
         )
         if ns_parser:
             volatility_view.display_bbands(
-                ticker=self.ticker,
-                ohlc=self.data,
-                length=ns_parser.n_length,
+                symbol=self.ticker,
+                data=self.data,
+                window=ns_parser.n_length,
                 n_std=ns_parser.n_std,
                 mamode=ns_parser.s_mamode,
                 export=ns_parser.export,
@@ -809,8 +813,8 @@ class TechnicalAnalysisController(StockBaseController):
         )
         if ns_parser:
             volatility_view.display_donchian(
-                ticker=self.ticker,
-                ohlc=self.data,
+                symbol=self.ticker,
+                data=self.data,
                 upper_length=ns_parser.n_length_upper,
                 lower_length=ns_parser.n_length_lower,
                 export=ns_parser.export,
@@ -850,8 +854,8 @@ class TechnicalAnalysisController(StockBaseController):
         )
         if ns_parser:
             volume_view.display_ad(
-                s_ticker=self.ticker,
-                ohlc=self.data,
+                symbol=self.ticker,
+                data=self.data,
                 use_open=ns_parser.b_use_open,
                 export=ns_parser.export,
             )
@@ -879,8 +883,8 @@ class TechnicalAnalysisController(StockBaseController):
         )
         if ns_parser:
             volume_view.display_obv(
-                s_ticker=self.ticker,
-                ohlc=self.data,
+                symbol=self.ticker,
+                data=self.data,
                 export=ns_parser.export,
             )
 
@@ -899,8 +903,10 @@ class TechnicalAnalysisController(StockBaseController):
             "--period",
             dest="period",
             type=int,
-            help="Days to lookback for retracement",
+            help="Days to look back for retracement",
             default=120,
+            choices=range(1, 960),
+            metavar="PERIOD",
         )
 
         parser.add_argument(
@@ -924,9 +930,9 @@ class TechnicalAnalysisController(StockBaseController):
         )
         if ns_parser:
             custom_indicators_view.fibonacci_retracement(
-                s_ticker=self.ticker,
-                ohlc=self.data,
-                period=ns_parser.period,
+                symbol=self.ticker,
+                data=self.data,
+                limit=ns_parser.period,
                 start_date=ns_parser.start,
                 end_date=ns_parser.end,
                 export=ns_parser.export,

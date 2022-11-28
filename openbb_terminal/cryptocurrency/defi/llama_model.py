@@ -10,6 +10,10 @@ import pandas as pd
 import requests
 
 from openbb_terminal.decorators import log_start_end
+from openbb_terminal.helper_funcs import lambda_long_number_format
+from openbb_terminal.cryptocurrency.dataframe_helpers import (
+    lambda_replace_underscores_in_column_names,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +32,28 @@ LLAMA_FILTERS = [
 
 
 @log_start_end(log=logger)
-def get_defi_protocols() -> pd.DataFrame:
+def get_defi_protocols(
+    limit: int = 100,
+    sortby: str = "",
+    ascend: bool = False,
+    description: bool = False,
+    drop_chain: bool = True,
+) -> pd.DataFrame:
     """Returns information about listed DeFi protocols, their current TVL and changes to it in the last hour/day/week.
     [Source: https://docs.llama.fi/api]
+
+    Parameters
+    ----------
+    limit: int
+        The number of dApps to display
+    sortby: str
+        Key by which to sort data
+    ascend: bool
+        Flag to sort data descending
+    description: bool
+        Flag to display description of protocol
+    drop_chain: bool
+        Whether to drop the chain column
 
     Returns
     -------
@@ -63,17 +86,49 @@ def get_defi_protocols() -> pd.DataFrame:
         df["description"] = df["description"].apply(
             lambda x: "\n".join(textwrap.wrap(x, width=70)) if isinstance(x, str) else x
         )
-        return df[columns]
+        df = df[columns]
 
     except Exception as e:
         logger.exception("Wrong response type: %s", str(e))
         raise ValueError("Wrong response type\n") from e
+
+    df = df.set_index("name")
+    if sortby:
+        df = df.sort_values(by=sortby, ascending=ascend)
+    if drop_chain:
+        df = df.drop(columns="chain")
+
+    df["tvl"] = df["tvl"].apply(lambda x: lambda_long_number_format(x))
+
+    if description:
+        orig = ["name", "symbol", "category", "description", "url"]
+        selection = [x for x in orig if x in df.columns]
+        df = df[selection]
+    else:
+        df.drop(["description", "url"], axis=1, inplace=True)
+
+    df.columns = [lambda_replace_underscores_in_column_names(val) for val in df.columns]
+    df.rename(
+        columns={
+            "Change 1H": "Change 1H (%)",
+            "Change 1D": "Change 1D (%)",
+            "Change 7D": "Change 7D (%)",
+            "Tvl": "TVL ($)",
+        },
+        inplace=True,
+    )
+    return df.head(limit)
 
 
 @log_start_end(log=logger)
 def get_defi_protocol(protocol: str) -> pd.DataFrame:
     """Returns information about historical tvl of a defi protocol.
     [Source: https://docs.llama.fi/api]
+
+    Parameters
+    ----------
+    protocol: str
+        Name of the protocol
 
     Returns
     -------
@@ -88,6 +143,27 @@ def get_defi_protocol(protocol: str) -> pd.DataFrame:
     df.date = pd.to_datetime(df.date, unit="s")
     df = df.set_index("date")
     return df
+
+
+@log_start_end(log=logger)
+def get_grouped_defi_protocols(
+    limit: int = 50,
+) -> pd.DataFrame:
+    """Display top dApps (in terms of TVL) grouped by chain.
+    [Source: https://docs.llama.fi/api]
+
+    Parameters
+    ----------
+    limit: int
+        Number of top dApps to display
+
+    Returns
+    -------
+    pd.DataFrame
+        Information about DeFi protocols grouped by chain
+    """
+    df = get_defi_protocols(limit, drop_chain=False)
+    return df.groupby("Chain").size().index.values.tolist()
 
 
 @log_start_end(log=logger)

@@ -9,7 +9,8 @@ from typing import List
 
 import investpy
 import pandas as pd
-from prompt_toolkit.completion import NestedCompleter
+
+from openbb_terminal.custom_prompt_toolkit import NestedCompleter
 
 from openbb_terminal import feature_flags as obbff
 from openbb_terminal.decorators import log_start_end
@@ -41,14 +42,14 @@ class FundController(BaseController):
         "resources",
         "country",
         "search",
-        "overview",
         "info",
         "load",
         "plot",
         "sector",
         "equity",
-        "al_swe",
-        "info_swe",
+        "alswe",
+        "infoswe",
+        "forecast",
     ]
 
     fund_countries = investpy.funds.get_fund_countries()
@@ -79,13 +80,41 @@ class FundController(BaseController):
 
         if session and obbff.USE_PROMPT_TOOLKIT:
             choices: dict = {c: {} for c in self.controller_choices}
-            choices["country"] = {c: None for c in self.fund_countries}
-            choices["search"]["-b"] = {c: None for c in self.search_by_choices}
-            choices["search"]["--by"] = {c: None for c in self.search_by_choices}
-            choices["search"]["-s"] = {c: None for c in self.search_cols}
-            choices["search"]["--sortby"] = {c: None for c in self.search_cols}
+
+            one_to_hundred: dict = {str(c): {} for c in range(1, 100)}
+            choices["country"] = {c: {} for c in self.fund_countries}
+            choices["overview"] = {
+                "--limit": None,
+                "-l": "--limit",
+            }
+            choices["search"] = {
+                "--by": {c: {} for c in self.search_by_choices},
+                "-b": "--by",
+                "--fund": None,
+                "--sortby": {c: None for c in self.search_cols},
+                "-s": "--sortby",
+                "--limit": None,
+                "-l": "--limit",
+                "--reverse": {},
+                "-r": "--reverse",
+            }
+            choices["load"] = {
+                "--fund": None,
+                "--name": {},
+                "-n": "--name",
+                "--start": None,
+                "-s": "--start",
+                "--end": None,
+                "-e": "--end",
+            }
+            choices["sector"] = {
+                "--min": one_to_hundred,
+                "-m": "--min",
+            }
+            choices["alswe"] = {"--focus": {c: {} for c in self.focus_choices}}
 
             choices["support"] = self.SUPPORT_CHOICES
+            choices["about"] = self.ABOUT_CHOICES
 
             self.completer = NestedCompleter.from_nested_dict(choices)
 
@@ -99,24 +128,24 @@ class FundController(BaseController):
         else:
             fund_string = ""
         mt = MenuText("funds/")
-        mt.add_cmd("country", "Investing.com")
+        mt.add_cmd("country")
         mt.add_raw("\n")
         mt.add_param("_country", self.country.title())
         mt.add_raw("\n")
-        mt.add_cmd("overview", "Investing.com")
-        mt.add_cmd("search", "Investing.com")
-        mt.add_cmd("load", "Investing.com")
+        mt.add_cmd("search")
+        mt.add_cmd("load")
         mt.add_raw("\n")
         mt.add_param("_fund", fund_string)
         mt.add_raw("\n")
-        mt.add_cmd("info", "Investing.com", self.fund_symbol)
-        mt.add_cmd("plot", "Investing.com", self.fund_symbol)
+        mt.add_cmd("info", self.fund_symbol)
+        mt.add_cmd("plot", self.fund_symbol)
         if self.country == "united states":
-            mt.add_cmd("sector", "Yahoo Finance", self.fund_symbol)
-            mt.add_cmd("equity", "Yahoo Finance", self.fund_symbol)
+            mt.add_cmd("sector", self.fund_symbol)
+            mt.add_cmd("equity", self.fund_symbol)
         if self.country == "sweden":
-            mt.add_cmd("al_swe", "Avanza", self.fund_symbol)
-            mt.add_cmd("info_swe", "Avanza", self.fund_symbol)
+            mt.add_cmd("alswe", self.fund_symbol)
+            mt.add_cmd("infoswe", self.fund_symbol)
+            mt.add_cmd("forecast", self.fund_symbol)
         console.print(text=mt.menu_text, menu="Mutual Funds")
 
     def custom_reset(self):
@@ -153,7 +182,6 @@ class FundController(BaseController):
                 console.print(
                     f"{country_candidate.lower()} not a valid country to select."
                 )
-        console.print("")
         return self.queue
 
     @log_start_end(log=logger)
@@ -174,7 +202,6 @@ class FundController(BaseController):
             help="Field to search by",
         )
         parser.add_argument(
-            "-f",
             "--fund",
             help="Fund string to search for",
             dest="fund",
@@ -199,15 +226,19 @@ class FundController(BaseController):
             default=10,
         )
         parser.add_argument(
-            "-a",
-            "--ascend",
-            dest="ascending",
-            help="Sort in ascending order",
+            "-r",
+            "--reverse",
             action="store_true",
+            dest="reverse",
             default=False,
+            help=(
+                "Data is sorted in descending order by default. "
+                "Reverse flag will sort it in an ascending way. "
+                "Only works when raw data is displayed."
+            ),
         )
         if other_args and "-" not in other_args[0][0]:
-            other_args.insert(0, "-f")
+            other_args.insert(0, "--fund")
         ns_parser = self.parse_known_args_and_warn(parser, other_args)
         if ns_parser:
             search_string = " ".join(ns_parser.fund)
@@ -217,7 +248,7 @@ class FundController(BaseController):
                 country=self.country,
                 limit=ns_parser.limit,
                 sortby=ns_parser.sortby,
-                ascending=ns_parser.ascending,
+                ascend=ns_parser.reverse,
             )
         return self.queue
 
@@ -276,7 +307,6 @@ class FundController(BaseController):
             description="Get historical data.",
         )
         parser.add_argument(
-            "-f",
             "--fund",
             help="Fund string to search for",
             dest="fund",
@@ -310,7 +340,7 @@ class FundController(BaseController):
             help="The ending date (format YYYY-MM-DD) of the fund",
         )
         if other_args and "-" not in other_args[0][0]:
-            other_args.insert(0, "-f")
+            other_args.insert(0, "--fund")
         ns_parser = self.parse_known_args_and_warn(parser, other_args)
         if ns_parser:
             parsed_fund = " ".join(ns_parser.fund)
@@ -320,8 +350,8 @@ class FundController(BaseController):
                 self.fund_symbol,
                 self.country,
             ) = investpy_model.get_fund_historical(
-                fund=parsed_fund,
-                name=ns_parser.name,
+                name=parsed_fund,
+                by_name=ns_parser.name,
                 country=self.country,
                 start_date=ns_parser.start,
                 end_date=ns_parser.end,
@@ -334,7 +364,6 @@ Potential errors
     -- ISIN supplied instead of symbol
     -- Name used, but --name flag not passed"""
                 )
-        console.print("")
         return self.queue
 
     @log_start_end(log=logger)
@@ -357,7 +386,7 @@ Potential errors
                 )
                 return self.queue
             investpy_view.display_historical(
-                self.data, fund=self.fund_name, export=ns_parser.export
+                self.data, name=self.fund_name, export=ns_parser.export
             )
         return self.queue
 
@@ -428,16 +457,15 @@ Potential errors
         return self.queue
 
     @log_start_end(log=logger)
-    def call_al_swe(self, other_args: List[str]):
-        """Process al_swe command"""
+    def call_alswe(self, other_args: List[str]):
+        """Process alswe command"""
         parser = argparse.ArgumentParser(
             add_help=False,
             formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-            prog="al_swe",
+            prog="alswe",
             description="Show allocation of a swedish fund.",
         )
         parser.add_argument(
-            "-f",
             "--focus",
             dest="focus",
             type=str,
@@ -475,12 +503,12 @@ Potential errors
         return self.queue
 
     @log_start_end(log=logger)
-    def call_info_swe(self, other_args: List[str]):
-        """Process info_swe command"""
+    def call_infoswe(self, other_args: List[str]):
+        """Process infoswe command"""
         parser = argparse.ArgumentParser(
             add_help=False,
             formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-            prog="info_swe",
+            prog="infoswe",
             description="Show fund info of a swedish fund.",
         )
 
@@ -511,3 +539,16 @@ Potential errors
             avanza_view.display_info(self.fund_name)
 
         return self.queue
+
+    @log_start_end(log=logger)
+    def call_forecast(self, _):
+        """Process forecast command"""
+        # pylint: disable=import-outside-toplevel
+        from openbb_terminal.forecast import forecast_controller
+
+        self.queue = self.load_class(
+            forecast_controller.ForecastController,
+            self.fund_name,
+            self.data,
+            self.queue,
+        )

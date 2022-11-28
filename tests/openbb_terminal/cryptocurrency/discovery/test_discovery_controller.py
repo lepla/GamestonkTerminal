@@ -16,7 +16,7 @@ from openbb_terminal.cryptocurrency.discovery import discovery_controller
 @pytest.mark.parametrize(
     "queue, expected",
     [
-        (["load", "help"], []),
+        (["load", "help"], ["help"]),
         (["quit", "help"], ["help"]),
     ],
 )
@@ -66,7 +66,7 @@ def test_menu_without_queue_completion(mocker):
 
     result_menu = discovery_controller.DiscoveryController(queue=None).menu()
 
-    assert result_menu == []
+    assert result_menu == ["help"]
 
 
 @pytest.mark.vcr(record_mode="none")
@@ -110,7 +110,7 @@ def test_menu_without_queue_sys_exit(mock_input, mocker):
 
     result_menu = discovery_controller.DiscoveryController(queue=None).menu()
 
-    assert result_menu == []
+    assert result_menu == ["help"]
 
 
 @pytest.mark.vcr(record_mode="none")
@@ -192,70 +192,70 @@ def test_call_func_expect_queue(expected_queue, func, queue):
     "tested_func, other_args, mocked_func, called_args, called_kwargs",
     [
         (
-            "call_cgtop",
-            ["stablecoins"],
+            "call_top",
+            ["stablecoins", "--source=CoinGecko"],
             "pycoingecko_view.display_coins",
             [],
             dict(),
         ),
         (
-            "call_drdapps",
+            "call_dapps",
             [],
             "dappradar_view.display_top_dapps",
             [],
             dict(),
         ),
         (
-            "call_drgames",
+            "call_games",
             [],
             "dappradar_view.display_top_games",
             [],
             dict(),
         ),
         (
-            "call_drdex",
+            "call_dex",
             [],
             "dappradar_view.display_top_dexes",
             [],
             dict(),
         ),
         (
-            "call_drnft",
+            "call_nft",
             [],
             "dappradar_view.display_top_nfts",
             [],
             dict(),
         ),
         (
-            "call_cggainers",
+            "call_gainers",
             [],
             "pycoingecko_view.display_gainers",
             [],
             dict(),
         ),
         (
-            "call_cglosers",
+            "call_losers",
             [],
             "pycoingecko_view.display_losers",
             [],
             dict(),
         ),
         (
-            "call_cgtrending",
+            "call_trending",
             [],
             "pycoingecko_view.display_trending",
             [],
             dict(),
         ),
         (
-            "call_cmctop",
-            [],
+            "call_top",
+            ["--source=CoinMarketCap"],
             "coinmarketcap_view.display_cmc_top_coins",
             [],
             dict(),
         ),
         (
-            "call_cpsearch",
+            "call_search",
             ["MOCK_QUERY"],
             "coinpaprika_view.display_search_results",
             [],

@@ -1,17 +1,17 @@
-    Symbol                                       Name Volume [$] Market Cap [$]  Market Cap Rank  7D Change [%]  24H Change [%]
-10  vision                                 APY.vision      42.6K           1.3M             2167      13.236021        7.168403
-5      vib                                   Viberate     614.6K           4.6M             1511       1.303144        6.079256
-7      uwl                                  UniWhales          0           3.9M             1590      -6.569339        2.314318
-4     push  Ethereum Push Notification Service - EPNS     737.7K          19.2M              896     -13.742802        2.947288
-2      prq                                     PARSIQ     499.4K          48.9M              589     -11.368488        7.333316
-14   moons                                  MoonTools          0         351.4K             2760     -12.540717             NaN
-12     krw                                      KROWN       5.5K         553.5K             2570      -2.491260       -0.565617
-0      grt                                  The Graph        58M           2.5B               53      -4.838908        1.856266
-6      glq                         GraphLinq Protocol       137K           4.3M             1543      -7.574684        3.303603
-3     dext                                   DexTools     222.3K          32.7M              710      25.938642        5.941974
-9     data                         Data Economy Index       1.2K           1.7M             2008       6.401614        3.931475
-1      cqt                                   Covalent       1.5M         100.3M              408      -9.590428        3.684198
-11   chart                                    ChartEx        152         587.3K             2541      33.269168       11.429070
-8      bdp                          Big Data Protocol     293.1K           2.3M             1841       9.361384       12.350032
-13   astro                                 AstroTools          0         357.9K             2751     -16.451474        0.503533
-
+    Symbol                Name Volume [$] Market Cap  Market Cap Rank  7D Change [%]  24H Change [%]
+8   vision          APY.vision       3.6K     948.7K             1985      21.187294        2.583935
+4      vib            Viberate       9.4M      13.4M              797      20.361318        4.124686
+7      uwl           UniWhales      19.8K       2.3M             1502      25.415291        1.687210
+6     push       Push Protocol       588K       4.6M             1204       7.142269        5.384511
+2      prq              PARSIQ       3.3M      23.3M              633      24.716873       25.859638
+15   moons           MoonTools          1          0             <NA>            NaN       -0.127583
+14     krw               KROWN        292      78.2K             3262      13.692898        3.693596
+0      grt           The Graph      39.1M     620.7M               74       4.656318        0.433542
+9      glq  GraphLinq Protocol      72.4K     598.9K             2255       7.288661        0.703644
+5     dobo            DogeBonk        11K       6.2M             1076      48.808246       -0.200775
+3     dext            DexTools     259.5K      13.5M              791      11.264005       -2.309393
+11    data  Data Economy Index        101     460.8K             2402      -1.624063       -0.213695
+1      cqt            Covalent     948.5K      45.7M              436      25.850260       -0.753528
+13   chart             ChartEx          6      99.3K             3180      17.215459             NaN
+10     bdp   Big Data Protocol     150.9K     570.6K             2277       9.771324       -8.029610
+12   astro          AstroTools      18.5K     113.8K             3132      17.191254        0.807919

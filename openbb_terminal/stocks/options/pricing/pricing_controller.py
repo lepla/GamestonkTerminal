@@ -6,14 +6,14 @@ import logging
 from typing import List
 
 import pandas as pd
-from prompt_toolkit.completion import NestedCompleter
 
 from openbb_terminal import feature_flags as obbff
+from openbb_terminal.custom_prompt_toolkit import NestedCompleter
 from openbb_terminal.decorators import log_start_end
 from openbb_terminal.helper_funcs import print_rich_table
 from openbb_terminal.menu import session
 from openbb_terminal.parent_classes import BaseController
-from openbb_terminal.rich_config import console, MenuText
+from openbb_terminal.rich_config import MenuText, console
 from openbb_terminal.stocks.options import yfinance_view
 
 logger = logging.getLogger(__name__)
@@ -29,6 +29,7 @@ class PricingController(BaseController):
         "rnval",
     ]
     PATH = "/stocks/options/pricing/"
+    CHOICES_GENERATION = True
 
     def __init__(
         self,
@@ -45,7 +46,7 @@ class PricingController(BaseController):
         self.prices = prices
 
         if session and obbff.USE_PROMPT_TOOLKIT:
-            choices: dict = {c: {} for c in self.controller_choices}
+            choices: dict = self.choices_default
             self.completer = NestedCompleter.from_nested_dict(choices)
 
     def print_help(self):
@@ -112,7 +113,6 @@ class PricingController(BaseController):
             new = {"Price": ns_parser.price, "Chance": ns_parser.chance}
             df = df.append(new, ignore_index=True)
             self.prices = df.sort_values("Price")
-            console.print("")
 
     @log_start_end(log=logger)
     def call_rmv(self, other_args: List[str]):
@@ -147,7 +147,6 @@ class PricingController(BaseController):
                 self.prices = pd.DataFrame(columns=["Price", "Chance"])
             else:
                 self.prices = self.prices[(self.prices["Price"] != ns_parser.price)]
-            console.print("")
 
     @log_start_end(log=logger)
     def call_show(self, other_args):
@@ -215,8 +214,8 @@ class PricingController(BaseController):
                         yfinance_view.risk_neutral_vals(
                             self.ticker,
                             self.selected_date,
-                            ns_parser.put,
                             self.prices,
+                            ns_parser.put,
                             ns_parser.mini,
                             ns_parser.maxi,
                             ns_parser.risk,

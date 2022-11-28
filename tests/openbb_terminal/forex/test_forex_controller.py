@@ -46,7 +46,7 @@ def vcr_config():
 @pytest.mark.parametrize(
     "queue, expected",
     [
-        (["load", "help"], []),
+        (["load", "help"], ["help"]),
         (["quit", "help"], ["help"]),
     ],
 )
@@ -96,7 +96,7 @@ def test_menu_without_queue_completion(mocker):
 
     result_menu = forex_controller.ForexController(queue=None).menu()
 
-    assert result_menu == []
+    assert result_menu == ["help"]
 
 
 @pytest.mark.vcr(record_mode="none")
@@ -140,7 +140,7 @@ def test_menu_without_queue_sys_exit(mock_input, mocker):
 
     result_menu = forex_controller.ForexController(queue=None).menu()
 
-    assert result_menu == []
+    assert result_menu == ["help"]
 
 
 @pytest.mark.vcr(record_mode="none")
@@ -247,7 +247,7 @@ def test_call_func_expect_queue(expected_queue, func, queue):
             [TechnicalAnalysisController],
             dict(
                 ticker="MOCK_TICKER/MOCK_TICKER",
-                source="yf",
+                source="YahooFinance",
                 data=NON_EMPTY_DF,
                 start=pd.Timestamp("2020-11-30 00:00:00"),
                 interval="",
@@ -280,7 +280,7 @@ def test_call_func(
         controller.fx_pair = "MOCK_TICKER"
         controller.to_symbol = "MOCK_TICKER"
         controller.from_symbol = "MOCK_TICKER"
-        controller.source = "yf"
+        controller.source = "YahooFinance"
         controller.interval = ""
 
         getattr(controller, tested_func)(other_args)
@@ -292,7 +292,7 @@ def test_call_func(
     else:
         controller = forex_controller.ForexController(queue=None)
         controller.stock = EMPTY_DF
-        controller.source = "yf"
+        controller.source = "YahooFinance"
         controller.to_symbol = "MOCK_TICKER"
         controller.from_symbol = "MOCK_TICKER"
         controller.interval = "1440min"
@@ -329,7 +329,6 @@ def test_call_func_no_parser(func, mocker):
         "call_candle",
         "call_ta",
         "call_qa",
-        "call_pred",
     ],
 )
 def test_call_func_no_ticker(func, mocker):

@@ -94,15 +94,11 @@ def display_etf_weightings(
         if external_axes is None:
             theme.visualize_output()
 
-        console.print("")
-
     export_data(export, os.path.dirname(os.path.abspath(__file__)), "weights", holdings)
 
 
 @log_start_end(log=logger)
-def display_etf_description(
-    name: str,
-):
+def display_etf_description(name: str):
     """Display ETF description summary. [Source: Yahoo Finance]
 
     Parameters

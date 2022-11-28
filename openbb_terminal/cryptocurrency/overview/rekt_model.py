@@ -63,7 +63,8 @@ def _make_request(url: str) -> Union[BeautifulSoup, None]:
 
     Returns
     -------
-        BeautifulSoup object
+    Union[BeautifulSoup, None]
+        BeautifulSoup object or None
     """
     headers = {"User-Agent": get_user_agent()}
     session = _retry_session("https://www.coingecko.com")
@@ -89,16 +90,20 @@ def _make_request(url: str) -> Union[BeautifulSoup, None]:
 
 
 @log_start_end(log=logger)
-def get_crypto_hacks() -> pd.DataFrame:
+def get_crypto_hacks(sortby: str = "Platform", ascend: bool = False) -> pd.DataFrame:
     """Get major crypto-related hacks
     [Source: https://rekt.news]
 
     Parameters
     ----------
+    sortby: str
+        Key by which to sort data {Platform,Date,Amount [$],Audit,Slug,URL}
+    ascend: bool
+        Flag to sort data ascending
 
     Returns
     -------
-    pandas.DataFrame:
+    pd.DataFrame
         Hacks with columns {Platform,Date,Amount [$],Audited,Slug,URL}
     """
     soup = _make_request("https://rekt.news/leaderboard")
@@ -124,6 +129,8 @@ def get_crypto_hacks() -> pd.DataFrame:
                 f"https://rekt.news{url}",
             ]
         df["Date"] = pd.to_datetime(df["Date"])
+        if sortby in HACKS_COLUMNS:
+            df = df.sort_values(by=sortby, ascending=ascend)
         return df
     return pd.DataFrame()
 
@@ -140,8 +147,8 @@ def get_crypto_hack(slug: str) -> Union[str, None]:
 
     Returns
     -------
-    pandas.DataFrame:
-        Hacks with columns {Platform,Date,Amount [$],Audited,URL}
+    Union[str, None]
+        Crypto hack
     """
     url = f"https://rekt.news/{slug}"
     soup = _make_request(url)
@@ -175,9 +182,10 @@ def get_crypto_hack(slug: str) -> Union[str, None]:
 def get_crypto_hack_slugs() -> List[str]:
     """Get all crypto hack slugs
     [Source: https://rekt.news]
+
     Returns
     -------
-    List[str]:
+    List[str]
         List with slugs
     """
     soup = _make_request("https://rekt.news/leaderboard")

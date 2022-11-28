@@ -3,11 +3,11 @@ __docformat__ = "numpy"
 
 import logging
 import warnings
-from typing import Any, Tuple, Union, List
+from typing import Tuple, Union
 import pandas as pd
 import statsmodels.api as sm
 from statsmodels.tools.sm_exceptions import MissingDataError
-from statsmodels.tsa.seasonal import seasonal_decompose
+from statsmodels.tsa.seasonal import DecomposeResult, seasonal_decompose
 from statsmodels.tsa.stattools import adfuller, kpss
 from scipy import stats
 import numpy as np
@@ -22,16 +22,21 @@ logger = logging.getLogger(__name__)
 
 
 @log_start_end(log=logger)
-def get_summary(df: pd.DataFrame) -> pd.DataFrame:
+def get_summary(data: pd.DataFrame) -> pd.DataFrame:
     """Print summary statistics
 
     Parameters
     ----------
-    df : pd.DataFrame
+    data : pd.DataFrame
         Dataframe to get summary statistics for
+
+    Returns
+    -------
+    summary : pd.DataFrame
+        Summary statistics
     """
 
-    df_stats = df.describe(percentiles=[0.1, 0.25, 0.5, 0.75, 0.9])
+    df_stats = data.describe(percentiles=[0.1, 0.25, 0.5, 0.75, 0.9])
     df_stats.loc["var"] = df_stats.loc["std"] ** 2
 
     return df_stats
@@ -39,25 +44,23 @@ def get_summary(df: pd.DataFrame) -> pd.DataFrame:
 
 @log_start_end(log=logger)
 def get_seasonal_decomposition(
-    df: pd.DataFrame, multiplicative: bool
-) -> Tuple[Any, pd.DataFrame, pd.DataFrame]:
+    data: pd.DataFrame, multiplicative: bool = False
+) -> Tuple[DecomposeResult, pd.DataFrame, pd.DataFrame]:
     """Perform seasonal decomposition
 
     Parameters
     ----------
-    df_stock : pd.DataFrame
+    data : pd.DataFrame
         Dataframe of targeted data
     multiplicative : bool
         Boolean to indicate multiplication instead of addition
 
     Returns
     -------
-    result: Any
-        Result of statsmodels seasonal_decompose
-    cycle: pd.DataFrame
-        Filtered cycle
-    trend: pd.DataFrame
-        Filtered Trend
+    Tuple[DecomposeResult, pd.DataFrame, pd.DataFrame]
+        DecomposeResult class from statsmodels (observed, seasonal, trend, residual, and weights),
+        Filtered cycle DataFrame,
+        Filtered trend DataFrame
     """
     seasonal_periods = 5
     # Hodrick-Prescott filter
@@ -66,7 +69,7 @@ def get_seasonal_decomposition(
 
     model = ["additive", "multiplicative"][multiplicative]
 
-    result = seasonal_decompose(df, model=model, period=seasonal_periods)
+    result = seasonal_decompose(data, model=model, period=seasonal_periods)
     cycle, trend = sm.tsa.filters.hpfilter(
         result.trend[result.trend.notna().values], lamb=lamb
     )
@@ -83,7 +86,7 @@ def get_normality(data: pd.DataFrame) -> pd.DataFrame:
 
     Parameters
     ----------
-    df : pd.DataFrame
+    data : pd.DataFrame
         Dataframe of targeted data
 
     Returns
@@ -129,17 +132,19 @@ def get_normality(data: pd.DataFrame) -> pd.DataFrame:
 
 
 @log_start_end(log=logger)
-def get_unitroot(df: pd.DataFrame, fuller_reg: str, kpss_reg: str) -> pd.DataFrame:
+def get_unitroot(
+    data: pd.DataFrame, fuller_reg: str = "c", kpss_reg: str = "c"
+) -> pd.DataFrame:
     """Calculate test statistics for unit roots
 
     Parameters
     ----------
-    df : pd.DataFrame
+    data : pd.DataFrame
         DataFrame of target variable
     fuller_reg : str
-        Type of regression of ADF test
+        Type of regression of ADF test. Can be ‘c’,’ct’,’ctt’,’nc’ 'c' - Constant and t - trend order
     kpss_reg : str
-        Type of regression for KPSS test
+        Type of regression for KPSS test.  Can be ‘c’,’ct'
 
     Returns
     -------
@@ -149,10 +154,10 @@ def get_unitroot(df: pd.DataFrame, fuller_reg: str, kpss_reg: str) -> pd.DataFra
     # The Augmented Dickey-Fuller test
     # Used to test for a unit root in a univariate process in the presence of serial correlation.
     try:
-        result = adfuller(df, regression=fuller_reg)
+        result = adfuller(data, regression=fuller_reg)
     except MissingDataError:
-        df = df.dropna(axis=0)
-        result = adfuller(df, regression=fuller_reg)
+        data = data.dropna(axis=0)
+        result = adfuller(data, regression=fuller_reg)
     cols = ["Test Statistic", "P-Value", "NLags", "Nobs", "ICBest"]
     vals = [result[0], result[1], result[2], result[3], result[5]]
     data = pd.DataFrame(data=vals, index=cols, columns=["ADF"])
@@ -165,7 +170,10 @@ def get_unitroot(df: pd.DataFrame, fuller_reg: str, kpss_reg: str) -> pd.DataFra
     # Wrap this in catch_warnings to prevent
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        res2 = kpss(df, regression=kpss_reg, nlags="auto")
+        try:
+            res2 = kpss(data, regression=kpss_reg, nlags="auto")
+        except ValueError:
+            return pd.DataFrame()
     vals2 = [res2[0], res2[1], res2[2], "", ""]
     data["KPSS"] = vals2
     return data
@@ -173,7 +181,7 @@ def get_unitroot(df: pd.DataFrame, fuller_reg: str, kpss_reg: str) -> pd.DataFra
 
 def calculate_adjusted_var(
     kurtosis: float, skew: float, ndp: float, std: float, mean: float
-):
+) -> float:
     """Calculates VaR, which is adjusted for skew and kurtosis (Cornish-Fischer-Expansion)
 
     Parameters
@@ -215,20 +223,20 @@ def calculate_adjusted_var(
 
 def get_var(
     data: pd.DataFrame,
-    use_mean: bool,
-    adjusted_var: bool,
-    student_t: bool,
-    percentile: Union[int, float],
-    portfolio: bool,
-):
-    """Gets value at risk for specified stock dataframe
+    use_mean: bool = False,
+    adjusted_var: bool = False,
+    student_t: bool = False,
+    percentile: Union[int, float] = 99.9,
+    portfolio: bool = False,
+) -> pd.DataFrame:
+    """Gets value at risk for specified stock dataframe.
 
     Parameters
     ----------
     data: pd.DataFrame
-        Dataframe of a stock/portfolio
+        Data dataframe
     use_mean: bool
-        If one should use the stocks mean for calculation
+        If one should use the data mean for calculation
     adjusted_var: bool
         If one should return VaR adjusted for skew and kurtosis
     student_t: bool
@@ -240,10 +248,8 @@ def get_var(
 
     Returns
     -------
-    list
-        list of VaR
-    list
-        list of historical VaR
+    pd.DataFrame
+        DataFrame with Value at Risk per percentile
     """
     if not portfolio:
         data = data[["adjclose"]].copy()
@@ -254,6 +260,8 @@ def get_var(
         data_return = data
 
     # Distribution percentages
+    percentile = percentile / 100
+
     percentile_90 = -1.282
     percentile_95 = -1.645
     percentile_99 = -2.326
@@ -298,10 +306,10 @@ def get_var(
 
     else:
         # Regular Var
-        var_90 = np.exp(mean + percentile_90 * std) - 1
-        var_95 = np.exp(mean + percentile_95 * std) - 1
-        var_99 = np.exp(mean + percentile_99 * std) - 1
-        var_custom = np.exp(mean + percentile_custom * std) - 1
+        var_90 = mean + percentile_90 * std
+        var_95 = mean + percentile_95 * std
+        var_99 = mean + percentile_99 * std
+        var_custom = mean + percentile_custom * std
 
     if not portfolio:
         data.sort_values("return", inplace=True, ascending=True)
@@ -316,26 +324,49 @@ def get_var(
     hist_var_99 = data_return.quantile(0.01)
     hist_var_custom = data_return.quantile(1 - percentile)
 
-    var_list = [var_90, var_95, var_99, var_custom]
-    hist_var_list = [hist_var_90, hist_var_95, hist_var_99, hist_var_custom]
-    return var_list, hist_var_list
+    var_list = [var_90 * 100, var_95 * 100, var_99 * 100, var_custom * 100]
+    hist_var_list = [
+        hist_var_90 * 100,
+        hist_var_95 * 100,
+        hist_var_99 * 100,
+        hist_var_custom * 100,
+    ]
+
+    str_hist_label = "Historical VaR [%]"
+
+    if adjusted_var:
+        str_var_label = "Adjusted VaR [%]"
+    elif student_t:
+        str_var_label = "Student-t VaR [%]"
+    else:
+        str_var_label = "Gaussian VaR [%]"
+
+    data_dictionary = {str_var_label: var_list, str_hist_label: hist_var_list}
+    df = pd.DataFrame(
+        data_dictionary, index=["90.0%", "95.0%", "99.0%", f"{percentile*100}%"]
+    )
+
+    df.sort_index(inplace=True)
+    df = df.replace(np.nan, "-")
+
+    return df
 
 
 def get_es(
     data: pd.DataFrame,
-    use_mean: bool,
-    distribution: str,
-    percentile: Union[float, int],
-    portfolio: bool,
-) -> Tuple[List[float], List[float]]:
-    """Gets Expected Shortfall for specified stock dataframe
+    use_mean: bool = False,
+    distribution: str = "normal",
+    percentile: Union[float, int] = 99.9,
+    portfolio: bool = False,
+) -> pd.DataFrame:
+    """Gets Expected Shortfall for specified stock dataframe.
 
     Parameters
     ----------
     data: pd.DataFrame
-        Dataframe of a stock
+        Data dataframe
     use_mean: bool
-        If one should use the stocks mean for calculation
+        If one should use the data mean for calculation
     distribution: str
         Type of distribution, options: laplace, student_t, normal
     percentile: Union[float,int]
@@ -345,10 +376,8 @@ def get_es(
 
     Returns
     -------
-    list
-        list of ES
-    list
-        list of historical ES
+    pd.DataFrame
+        DataFrame with Expected Shortfall per percentile
     """
     if not portfolio:
         data = data[["adjclose"]].copy()
@@ -359,6 +388,8 @@ def get_es(
         data_return = data
 
     # Distribution percentages
+    percentile = percentile / 100
+
     percentile_90 = -1.282
     percentile_95 = -1.645
     percentile_99 = -2.326
@@ -464,19 +495,48 @@ def get_es(
         es_custom = std * -stats.norm.pdf(percentile_custom) / (1 - percentile) + mean
 
     # Historical Expected Shortfall
-    _, hist_var_list = get_var(data, use_mean, False, False, percentile, portfolio)
+    df = get_var(data, use_mean, False, False, percentile, portfolio)
+
+    hist_var_list = list(df["Historical VaR [%]"].values)
+
     hist_es_90 = data_return[data_return <= hist_var_list[0]].mean()
     hist_es_95 = data_return[data_return <= hist_var_list[1]].mean()
     hist_es_99 = data_return[data_return <= hist_var_list[2]].mean()
     hist_es_custom = data_return[data_return <= hist_var_list[3]].mean()
 
-    es_list = [es_90, es_95, es_99, es_custom]
-    hist_es_list = [hist_es_90, hist_es_95, hist_es_99, hist_es_custom]
-    return es_list, hist_es_list
+    es_list = [es_90 * 100, es_95 * 100, es_99 * 100, es_custom * 100]
+    hist_es_list = [
+        hist_es_90 * 100,
+        hist_es_95 * 100,
+        hist_es_99 * 100,
+        hist_es_custom * 100,
+    ]
+
+    str_hist_label = "Historical ES [%]"
+
+    if distribution == "laplace":
+        str_es_label = "Laplace ES [%]"
+    elif distribution == "student_t":
+        str_es_label = "Student-t ES [%]"
+    elif distribution == "logistic":
+        str_es_label = "Logistic ES [%]"
+    else:
+        str_es_label = "ES [%]"
+
+    data_dictionary = {str_es_label: es_list, str_hist_label: hist_es_list}
+    df = pd.DataFrame(
+        data_dictionary, index=["90.0%", "95.0%", "99.0%", f"{percentile*100}%"]
+    )
+
+    df.sort_index(inplace=True)
+    df = df.replace(np.nan, "-")
+
+    return df
 
 
-def get_sharpe(data: pd.DataFrame, rfr: float = 0, window: float = 252):
+def get_sharpe(data: pd.DataFrame, rfr: float = 0, window: float = 252) -> pd.DataFrame:
     """Calculates the sharpe ratio
+
     Parameters
     ----------
     data: pd.DataFrame
@@ -485,6 +545,11 @@ def get_sharpe(data: pd.DataFrame, rfr: float = 0, window: float = 252):
         risk free rate
     window: float
         length of the rolling window
+
+    Returns
+    -------
+    sharpe: pd.DataFrame
+        sharpe ratio
     """
     data_return = data.pct_change().rolling(window).sum() * 100
     std = data.rolling(window).std() / np.sqrt(252) * 100
@@ -499,8 +564,9 @@ def get_sortino(
     target_return: float = 0,
     window: float = 252,
     adjusted: bool = False,
-):
+) -> pd.DataFrame:
     """Calculates the sortino ratio
+
     Parameters
     ----------
     data: pd.DataFrame
@@ -511,6 +577,11 @@ def get_sortino(
         length of the rolling window
     adjusted: bool
         adjust the sortino ratio
+
+    Returns
+    -------
+    sortino: pd.DataFrame
+        sortino ratio
     """
     data = data * 100
 
@@ -532,14 +603,20 @@ def get_sortino(
     return sortino_ratio
 
 
-def get_omega(data: pd.DataFrame, threshold: float = 0):
+def get_omega_ratio(data: pd.DataFrame, threshold: float = 0) -> float:
     """Calculates the omega ratio
+
     Parameters
     ----------
     data: pd.DataFrame
         selected dataframe
     threshold: float
         target return threshold
+
+    Returns
+    -------
+    omega_ratio: float
+        omega ratio
     """
     # Omega ratio; for more information and explanation see:
     # https://en.wikipedia.org/wiki/Omega_ratio
@@ -557,3 +634,31 @@ def get_omega(data: pd.DataFrame, threshold: float = 0):
     omega_ratio = data_positive_sum / (-data_negative_sum)
 
     return omega_ratio
+
+
+def get_omega(
+    data: pd.DataFrame, threshold_start: float = 0, threshold_end: float = 1.5
+) -> pd.DataFrame:
+    """Get the omega series
+
+    Parameters
+    ----------
+    data: pd.DataFrame
+        stock dataframe
+    threshold_start: float
+        annualized target return threshold start of plotted threshold range
+    threshold_end: float
+        annualized target return threshold end of plotted threshold range
+
+    Returns
+    -------
+    omega: pd.DataFrame
+        omega series
+    """
+    threshold = np.linspace(threshold_start, threshold_end, 50)
+    df = pd.DataFrame(threshold, columns=["threshold"])
+
+    omega_list = [get_omega_ratio(data, i) for i in threshold]
+    df["omega"] = omega_list
+
+    return df

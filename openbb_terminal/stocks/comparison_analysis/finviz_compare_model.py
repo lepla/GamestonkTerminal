@@ -1,8 +1,8 @@
-""" Finviz Comparison Model """
+"""Finviz Comparison Model"""
 __docformat__ = "numpy"
 
 import logging
-from typing import List, Tuple
+from typing import List
 
 import pandas as pd
 from finvizfinance.screener import (
@@ -22,14 +22,12 @@ logger = logging.getLogger(__name__)
 
 
 @log_start_end(log=logger)
-def get_similar_companies(
-    ticker: str, compare_list: List[str]
-) -> Tuple[List[str], str]:
-    """Get similar companies from Finviz
+def get_similar_companies(symbol: str, compare_list: List[str] = None) -> List[str]:
+    """Get similar companies from Finviz.
 
     Parameters
     ----------
-    ticker : str
+    symbol : str
         Ticker to find comparisons for
     compare_list : List[str]
         List of fields to compare, ["Sector", "Industry", "Country"]
@@ -38,33 +36,34 @@ def get_similar_companies(
     -------
     List[str]
         List of similar companies
-    str
-        String containing data source
     """
     try:
+        compare_list = ["Sector", "Industry"] if compare_list is None else compare_list
         similar = (
-            Overview().compare(ticker, compare_list, verbose=0)["Ticker"].to_list()
+            Overview().compare(symbol, compare_list, verbose=0)["Ticker"].to_list()
         )
-        user = "Finviz"
     except Exception as e:
         logger.exception(str(e))
         console.print(e)
         similar = [""]
-        user = "Error"
-    return similar, user
+    return similar
 
 
 @log_start_end(log=logger)
-def get_comparison_data(data_type: str, similar: List[str]):
-    """Screener Overview
+def get_comparison_data(similar: List[str], data_type: str = "overview"):
+    """Screener Overview.
 
     Parameters
     ----------
+    similar:
+        List of similar companies.
+        Comparable companies can be accessed through
+        finnhub_peers(), finviz_peers(), polygon_peers().
     data_type : str
         Data type between: overview, valuation, financial, ownership, performance, technical
 
     Returns
-    ----------
+    -------
     pd.DataFrame
         Dataframe with overview, valuation, financial, ownership, performance or technical
     """

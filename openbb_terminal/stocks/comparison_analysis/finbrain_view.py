@@ -35,12 +35,14 @@ def display_sentiment_compare(
     export: str = "",
     external_axes: Optional[List[plt.Axes]] = None,
 ):
-    """Display sentiment for all ticker. [Source: FinBrain]
+    """Display sentiment for all ticker. [Source: FinBrain].
 
     Parameters
     ----------
     similar : List[str]
-        Similar companies to compare income with
+        Similar companies to compare income with.
+        Comparable companies can be accessed through
+        finviz_peers(), finnhub_peers() or polygon_peers().
     raw : bool, optional
         Output raw values, by default False
     export : str, optional
@@ -113,7 +115,6 @@ def display_sentiment_compare(
             "sentiment",
             df_sentiment,
         )
-    console.print("")
 
 
 @log_start_end(log=logger)
@@ -123,12 +124,14 @@ def display_sentiment_correlation(
     export: str = "",
     external_axes: Optional[List[plt.Axes]] = None,
 ):
-    """Plot correlation sentiments heatmap across similar companies. [Source: FinBrain]
+    """Plot correlation sentiments heatmap across similar companies. [Source: FinBrain].
 
     Parameters
     ----------
     similar : List[str]
-        Similar companies to compare income with
+        Similar companies to compare income with.
+        Comparable companies can be accessed through
+        finviz_peers(), finnhub_peers() or polygon_peers().
     raw : bool, optional
         Output raw values, by default False
     export : str, optional
@@ -136,8 +139,7 @@ def display_sentiment_correlation(
     external_axes : Optional[List[plt.Axes]], optional
         External axes (1 axis is expected in the list), by default None
     """
-    df_sentiment = finbrain_model.get_sentiments(similar)
-    corrs = df_sentiment.corr()
+    corrs, df_sentiment = finbrain_model.get_sentiment_correlation(similar)
 
     if df_sentiment.empty:
         console.print("No sentiments found.")

@@ -20,7 +20,7 @@ PRICES = pd.DataFrame(data={"Price": [11.0, 12.0], "Chance": [0.2, 0.8]})
 @pytest.mark.parametrize(
     "queue, expected",
     [
-        (["load", "help"], []),
+        (["load", "help"], ["help"]),
         (["quit", "help"], ["help"]),
     ],
 )
@@ -70,7 +70,7 @@ def test_menu_without_queue_completion(mocker):
 
     result_menu = screener_controller.ScreenerController(queue=None).menu()
 
-    assert result_menu == []
+    assert result_menu == ["help"]
 
 
 @pytest.mark.vcr(record_mode="none")
@@ -114,7 +114,7 @@ def test_menu_without_queue_sys_exit(mock_input, mocker):
 
     result_menu = screener_controller.ScreenerController(queue=None).menu()
 
-    assert result_menu == []
+    assert result_menu == ["help"]
 
 
 @pytest.mark.vcr(record_mode="none")
@@ -217,7 +217,7 @@ def test_call_func_expect_queue(expected_queue, func, queue):
         (
             "call_view",
             [
-                "oversold",
+                "oversold.ini",
             ],
             "",
             [],
@@ -233,7 +233,16 @@ def test_call_func_expect_queue(expected_queue, func, queue):
         (
             "call_set",
             [
-                "oversold",
+                "oversold.ini",
+            ],
+            "",
+            [],
+            dict(),
+        ),
+        (
+            "call_set",
+            [
+                "short_squeeze_scan.ini",
             ],
             "",
             [],
@@ -263,7 +272,7 @@ def test_call_func_expect_queue(expected_queue, func, queue):
             "call_overview",
             [
                 "1",
-                "--ascend",
+                "--reverse",
                 "--sort=Ticker",
                 "--export=csv",
             ],
@@ -274,7 +283,7 @@ def test_call_func_expect_queue(expected_queue, func, queue):
                 data_type="overview",
                 limit=1,
                 ascend=True,
-                sort="Ticker",
+                sortby="Ticker",
                 export="csv",
             ),
         ),
@@ -283,7 +292,7 @@ def test_call_func_expect_queue(expected_queue, func, queue):
             [
                 "1",
                 "--preset=top_gainers",
-                "--ascend",
+                "--reverse",
                 "--sort=Ticker",
                 "--export=csv",
             ],
@@ -294,7 +303,7 @@ def test_call_func_expect_queue(expected_queue, func, queue):
                 data_type="valuation",
                 limit=1,
                 ascend=True,
-                sort="Ticker",
+                sortby="Ticker",
                 export="csv",
             ),
         ),
@@ -303,7 +312,7 @@ def test_call_func_expect_queue(expected_queue, func, queue):
             [
                 "1",
                 "--preset=top_gainers",
-                "--ascend",
+                "--reverse",
                 "--sort=Ticker",
                 "--export=csv",
             ],
@@ -314,7 +323,7 @@ def test_call_func_expect_queue(expected_queue, func, queue):
                 data_type="financial",
                 limit=1,
                 ascend=True,
-                sort="Ticker",
+                sortby="Ticker",
                 export="csv",
             ),
         ),
@@ -323,7 +332,7 @@ def test_call_func_expect_queue(expected_queue, func, queue):
             [
                 "1",
                 "--preset=top_gainers",
-                "--ascend",
+                "--reverse",
                 "--sort=Ticker",
                 "--export=csv",
             ],
@@ -334,7 +343,7 @@ def test_call_func_expect_queue(expected_queue, func, queue):
                 data_type="ownership",
                 limit=1,
                 ascend=True,
-                sort="Ticker",
+                sortby="Ticker",
                 export="csv",
             ),
         ),
@@ -343,7 +352,7 @@ def test_call_func_expect_queue(expected_queue, func, queue):
             [
                 "1",
                 "--preset=top_gainers",
-                "--ascend",
+                "--reverse",
                 "--sort=Ticker",
                 "--export=csv",
             ],
@@ -354,7 +363,7 @@ def test_call_func_expect_queue(expected_queue, func, queue):
                 data_type="performance",
                 limit=1,
                 ascend=True,
-                sort="Ticker",
+                sortby="Ticker",
                 export="csv",
             ),
         ),
@@ -363,7 +372,7 @@ def test_call_func_expect_queue(expected_queue, func, queue):
             [
                 "1",
                 "--preset=top_gainers",
-                "--ascend",
+                "--reverse",
                 "--sort=Ticker",
                 "--export=csv",
             ],
@@ -374,16 +383,9 @@ def test_call_func_expect_queue(expected_queue, func, queue):
                 data_type="technical",
                 limit=1,
                 ascend=True,
-                sort="Ticker",
+                sortby="Ticker",
                 export="csv",
             ),
-        ),
-        (
-            "call_po",
-            [],
-            "po_controller.PortfolioOptimizationController.menu",
-            [],
-            dict(),
         ),
         (
             "call_ca",
@@ -424,7 +426,6 @@ def test_call_func_test(
 @pytest.mark.parametrize(
     "func",
     [
-        "call_po",
         "call_ca",
     ],
 )

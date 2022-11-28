@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 @log_start_end(log=logger)
 @check_api_key(["OANDA_ACCOUNT", "OANDA_TOKEN", "OANDA_ACCOUNT_TYPE"])
-def get_fx_price(account: str, instrument: Union[str, None]):
+def get_fx_price(account: str, instrument: Union[str, None] = ""):
     """View price for loaded currency pair.
 
     Parameters
@@ -54,7 +54,6 @@ def get_fx_price(account: str, instrument: Union[str, None]):
         ask = data["prices"][0]["asks"][0]["price"]
         console.print(f"{instrument if instrument else ''}" + " Bid: " + bid)
         console.print(f"{instrument if instrument else ''}" + " Ask: " + ask)
-        console.print("")
     else:
         console.print("No data was retrieved.\n")
 
@@ -80,7 +79,7 @@ def get_account_summary(accountID: str):
 @check_api_key(["OANDA_ACCOUNT", "OANDA_TOKEN", "OANDA_ACCOUNT_TYPE"])
 def get_order_book(
     accountID: str,
-    instrument: str,
+    instrument: str = "",
     external_axes: Optional[List[plt.Axes]] = None,
 ):
     """
@@ -109,7 +108,6 @@ def get_order_book(
         book_plot(
             df_orderbook_data, instrument, "Order Book", external_axes=external_axes
         )
-        console.print("")
     else:
         console.print("No data was retrieved.\n")
 
@@ -117,7 +115,7 @@ def get_order_book(
 @log_start_end(log=logger)
 @check_api_key(["OANDA_ACCOUNT", "OANDA_TOKEN", "OANDA_ACCOUNT_TYPE"])
 def get_position_book(
-    accountID: str, instrument: str, external_axes: Optional[List[plt.Axes]] = None
+    accountID: str, instrument: str = "", external_axes: Optional[List[plt.Axes]] = None
 ):
     """Plot a position book for an instrument if Oanda provides one.
 
@@ -147,14 +145,13 @@ def get_position_book(
             "Position Book",
             external_axes=external_axes,
         )
-        console.print("")
     else:
         console.print("No data was retrieved.\n")
 
 
 @log_start_end(log=logger)
 @check_api_key(["OANDA_ACCOUNT", "OANDA_TOKEN", "OANDA_ACCOUNT_TYPE"])
-def list_orders(accountID: str, order_state: str, order_count: int):
+def list_orders(accountID: str, order_state: str = "PENDING", order_count: int = 0):
     """List order history.
 
     Parameters
@@ -169,14 +166,13 @@ def list_orders(accountID: str, order_state: str, order_count: int):
     df_order_list = order_history_request(order_state, order_count, accountID)
     if df_order_list is not False and not df_order_list.empty:
         console.print(df_order_list)
-        console.print("")
     else:
         console.print("No data was retrieved.\n")
 
 
 @log_start_end(log=logger)
 @check_api_key(["OANDA_ACCOUNT", "OANDA_TOKEN", "OANDA_ACCOUNT_TYPE"])
-def create_order(accountID: str, instrument: str, price: int, units: int):
+def create_order(accountID: str, instrument: str = "", price: int = 0, units: int = 0):
     """Create a buy/sell order.
 
     Parameters
@@ -193,14 +189,13 @@ def create_order(accountID: str, instrument: str, price: int, units: int):
     df_orders = create_order_request(price, units, instrument, accountID)
     if df_orders is not False and not df_orders.empty:
         console.print(df_orders.to_string(index=False))
-        console.print("")
     else:
         console.print("No data was returned from Oanda.\n")
 
 
 @log_start_end(log=logger)
 @check_api_key(["OANDA_ACCOUNT", "OANDA_TOKEN", "OANDA_ACCOUNT_TYPE"])
-def cancel_pending_order(accountID: str, orderID: str):
+def cancel_pending_order(accountID: str, orderID: str = ""):
     """Cancel a Pending Order.
 
     Parameters
@@ -213,7 +208,6 @@ def cancel_pending_order(accountID: str, orderID: str):
     order_id = cancel_pending_order_request(orderID, accountID)
     if order_id is not False and order_id is not None:
         console.print(f"Order {order_id} canceled.")
-        console.print("")
     else:
         console.print("No data was returned from Oanda.\n")
 
@@ -231,7 +225,6 @@ def get_open_positions(accountID: str):
     df_positions = open_positions_request(accountID)
     if df_positions is not False and not df_positions.empty:
         console.print(df_positions.to_string(index=False))
-        console.print("")
     else:
         console.print("No data was returned from Oanda.\n")
 
@@ -249,16 +242,12 @@ def get_pending_orders(accountID: str):
     df_pending = pending_orders_request(accountID)
     if df_pending is not False and not df_pending.empty:
         console.print(df_pending.to_string(index=False))
-        console.print("")
     elif df_pending is not False and df_pending.empty:
         console.print("No pending orders.\n")
     else:
         console.print("No data was returned from Oanda.\n")
 
 
-# Pylint raises no-member error because the df_trades can be either
-# a dataframe or a boolean (False) value that has no .empty and no .to_string
-# pylint: disable=no-member
 @log_start_end(log=logger)
 @check_api_key(["OANDA_ACCOUNT", "OANDA_TOKEN", "OANDA_ACCOUNT_TYPE"])
 def get_open_trades(accountID: str):
@@ -270,9 +259,8 @@ def get_open_trades(accountID: str):
         Oanda user account ID
     """
     df_trades = open_trades_request(accountID)
-    if df_trades is not False and not df_trades.empty:
+    if isinstance(df_trades, pd.DataFrame) and not df_trades.empty:
         console.print(df_trades.to_string(index=False))
-        console.print("")
     elif df_trades is not False and df_trades.empty:
         console.print("No trades were found.\n")
     else:
@@ -281,7 +269,7 @@ def get_open_trades(accountID: str):
 
 @log_start_end(log=logger)
 @check_api_key(["OANDA_ACCOUNT", "OANDA_TOKEN", "OANDA_ACCOUNT_TYPE"])
-def close_trade(accountID: str, orderID: str, units: Union[int, None]):
+def close_trade(accountID: str, orderID: str = "", units: Union[int, None] = None):
     """Close a trade.
 
     Parameters
@@ -296,7 +284,6 @@ def close_trade(accountID: str, orderID: str, units: Union[int, None]):
     df_trades = close_trades_request(orderID, units, accountID)
     if df_trades is not False and not df_trades.empty:
         console.print(df_trades.to_string(index=False))
-        console.print("")
     elif df_trades is not False and df_trades.empty:
         console.print("No trades were found.\n")
     else:
@@ -306,9 +293,9 @@ def close_trade(accountID: str, orderID: str, units: Union[int, None]):
 @log_start_end(log=logger)
 @check_api_key(["OANDA_ACCOUNT", "OANDA_TOKEN", "OANDA_ACCOUNT_TYPE"])
 def show_candles(
-    instrument: str,
-    granularity: str,
-    candlecount: int,
+    instrument: str = "",
+    granularity: str = "D",
+    candlecount: int = 180,
     additional_charts: Optional[Dict[str, bool]] = None,
     external_axes: Optional[List[plt.Axes]] = None,
 ):
@@ -321,7 +308,9 @@ def show_candles(
     instrument : str
         The loaded currency pair
     granularity : str, optional
-        Data granularity
+        The timeframe to get for the candle chart. Seconds: S5, S10, S15, S30
+        Minutes: M1, M2, M4, M5, M10, M15, M30 Hours: H1, H2, H3, H4, H6, H8, H12
+        Day (default): D, Week: W Month: M,
     candlecount : int, optional
         Limit for the number of data points
     additional_charts : Dict[str, bool]
@@ -392,7 +381,7 @@ def show_candles(
 
 @log_start_end(log=logger)
 @check_api_key(["OANDA_ACCOUNT", "OANDA_TOKEN", "OANDA_ACCOUNT_TYPE"])
-def calendar(instrument: str, days: int):
+def calendar(instrument: str, days: int = 7):
     """View calendar of significant events.
 
     Parameters
@@ -405,7 +394,6 @@ def calendar(instrument: str, days: int):
     df_calendar = get_calendar_request(days, instrument)
     if df_calendar is not False and not df_calendar.empty:
         console.print(df_calendar.to_string(index=False))
-        console.print("")
     elif df_calendar is not False and df_calendar.empty:
         console.print("No calendar records were found.\n")
     else:

@@ -5,40 +5,46 @@ __docformat__ = "numpy"
 
 import argparse
 import logging
-from itertools import chain
 import os
+from itertools import chain
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
 import numpy as np
 import pandas as pd
-from prompt_toolkit.completion import NestedCompleter
 
-import openbb_terminal.econometrics.regression_model
-import openbb_terminal.econometrics.regression_view
 from openbb_terminal import feature_flags as obbff
+from openbb_terminal.common import common_model
+from openbb_terminal.core.config.paths import (
+    USER_CUSTOM_IMPORTS_DIRECTORY,
+    USER_EXPORTS_DIRECTORY,
+)
+from openbb_terminal.custom_prompt_toolkit import NestedCompleter
 from openbb_terminal.decorators import log_start_end
-from openbb_terminal.helper_funcs import (
-    check_positive,
-    check_positive_float,
-    NO_EXPORT,
-    EXPORT_ONLY_FIGURES_ALLOWED,
-    EXPORT_ONLY_RAW_DATA_ALLOWED,
-    EXPORT_BOTH_RAW_DATA_AND_FIGURES,
-    export_data,
+from openbb_terminal.econometrics import (
+    econometrics_model,
+    econometrics_view,
+    regression_model,
+    regression_view,
 )
 from openbb_terminal.helper_funcs import (
-    print_rich_table,
+    EXPORT_BOTH_RAW_DATA_AND_FIGURES,
+    EXPORT_ONLY_FIGURES_ALLOWED,
+    EXPORT_ONLY_RAW_DATA_ALLOWED,
+    NO_EXPORT,
     check_list_values,
+    check_positive,
+    check_positive_float,
+    export_data,
+    print_rich_table,
 )
 from openbb_terminal.menu import session
 from openbb_terminal.parent_classes import BaseController
-from openbb_terminal.rich_config import console, MenuText
-from openbb_terminal.econometrics import econometrics_model, econometrics_view
+from openbb_terminal.rich_config import MenuText, console
 
 logger = logging.getLogger(__name__)
 
-# pylint: disable=R0902
+# pylint: disable=R0902,C0302
 
 
 class EconometricsController(BaseController):
@@ -69,7 +75,9 @@ class EconometricsController(BaseController):
         "granger",
         "coint",
     ]
-    CHOICES_MENUS: List[str] = ["qa", "pred"]
+    CHOICES_MENUS: List[str] = [
+        "qa",
+    ]
     pandas_plot_choices = [
         "line",
         "scatter",
@@ -82,6 +90,19 @@ class EconometricsController(BaseController):
         "pie",
         "hexbin",
     ]
+
+    PANEL_CHOICES = [
+        "pols",
+        "re",
+        "bols",
+        "fe",
+        "fdols",
+        "POLS",
+        "RE",
+        "BOLS",
+        "FE",
+        "FDOLS",
+    ]
     PATH = "/econometrics/"
 
     loaded_dataset_cols = "\n"
@@ -93,38 +114,6 @@ class EconometricsController(BaseController):
         self.files: List[str] = list()
         self.datasets: Dict[str, pd.DataFrame] = dict()
         self.regression: Dict[Any[Dict, Any], Any] = dict()
-
-        self.DATA_EXAMPLES: Dict[str, str] = {
-            "anes96": "American National Election Survey 1996",
-            "cancer": "Breast Cancer Data",
-            "ccard": "Bill Greene’s credit scoring data.",
-            "cancer_china": "Smoking and lung cancer in eight cities in China.",
-            "co2": "Mauna Loa Weekly Atmospheric CO2 Data",
-            "committee": "First 100 days of the US House of Representatives 1995",
-            "copper": "World Copper Market 1951-1975 Dataset",
-            "cpunish": "US Capital Punishment dataset.",
-            "danish_data": "Danish Money Demand Data",
-            "elnino": "El Nino - Sea Surface Temperatures",
-            "engel": "Engel (1857) food expenditure data",
-            "fair": "Affairs dataset",
-            "fertility": "World Bank Fertility Data",
-            "grunfeld": "Grunfeld (1950) Investment Data",
-            "heart": "Transplant Survival Data",
-            "interest_inflation": "(West) German interest and inflation rate 1972-1998",
-            "longley": "Longley dataset",
-            "macrodata": "United States Macroeconomic data",
-            "modechoice": "Travel Mode Choice",
-            "nile": "Nile River flows at Ashwan 1871-1970",
-            "randhie": "RAND Health Insurance Experiment Data",
-            "scotland": "Taxation Powers Vote for the Scottish Parliament 1997",
-            "spector": "Spector and Mazzeo (1980) - Program Effectiveness Data",
-            "stackloss": "Stack loss data",
-            "star98": "Star98 Educational Dataset",
-            "statecrim": "Statewide Crime Data 2009",
-            "strikes": "U.S. Strike Duration Data",
-            "sunspots": "Yearly sunspots data 1700-2008",
-            "wage_panel": "Veila and M. Verbeek (1998): Whose Wages Do Unions Raise?",
-        }
 
         self.DATA_TYPES: List[str] = ["int", "float", "str", "bool", "category", "date"]
 
@@ -154,53 +143,60 @@ class EconometricsController(BaseController):
             "mod": "%",
             "pow": "**",
         }
-        self.file_types = ["csv", "xlsx"]
         self.DATA_FILES = {
             filepath.name: filepath
-            for file_type in self.file_types
+            for file_type in common_model.file_types
             for filepath in chain(
-                Path(obbff.EXPORT_FOLDER_PATH).rglob(f"*.{file_type}"),
-                Path("custom_imports").rglob(f"*.{file_type}"),
+                Path(USER_EXPORTS_DIRECTORY).rglob(f"*.{file_type}"),
+                Path(USER_CUSTOM_IMPORTS_DIRECTORY / "econometrics").rglob(
+                    f"*.{file_type}"
+                ),
             )
             if filepath.is_file()
         }
 
         if session and obbff.USE_PROMPT_TOOLKIT:
             choices: dict = {c: {} for c in self.controller_choices}
-            choices["load"] = {c: None for c in self.DATA_FILES.keys()}
-            choices["show"] = {c: None for c in self.files}
+            choices["load"] = {
+                "--file": {c: {} for c in self.DATA_FILES.keys()},
+                "-f": "--file",
+                "-alias": None,
+                "-a": "-alias",
+                "--examples": None,
+                "-e": "--examples",
+            }
 
             for feature in ["export", "show", "desc", "clear", "index"]:
-                choices[feature] = {c: None for c in self.files}
+                choices[feature] = {c: {} for c in self.files}
 
             for feature in [
-                "general",
                 "type",
                 "plot",
                 "norm",
                 "root",
                 "granger",
                 "coint",
-                "regressions",
             ]:
                 choices[feature] = dict()
 
+            # Inititialzie this for regressions to be able to use -h flag
+            choices["regressions"] = {}
             self.choices = choices
 
             choices["support"] = self.SUPPORT_CHOICES
-
+            choices["about"] = self.ABOUT_CHOICES
+            choices["panel"]["-r"] = {c: {} for c in self.PANEL_CHOICES}
             self.completer = NestedCompleter.from_nested_dict(choices)
 
     def update_runtime_choices(self):
         if session and obbff.USE_PROMPT_TOOLKIT:
             dataset_columns = {
-                f"{dataset}.{column}": {column: None, dataset: None}
+                f"{dataset}.{column}": {}
                 for dataset, dataframe in self.datasets.items()
                 for column in dataframe.columns
             }
 
             for feature in [
-                "general",
                 "plot",
                 "norm",
                 "root",
@@ -220,13 +216,13 @@ class EconometricsController(BaseController):
                 "combine",
                 "rename",
             ]:
-                self.choices[feature] = {c: None for c in self.files}
+                self.choices[feature] = {c: {} for c in self.files}
 
             self.choices["type"] = {
-                c: None for c in self.files + list(dataset_columns.keys())
+                c: {} for c in self.files + list(dataset_columns.keys())
             }
             self.choices["desc"] = {
-                c: None for c in self.files + list(dataset_columns.keys())
+                c: {} for c in self.files + list(dataset_columns.keys())
             }
 
             pairs_timeseries = list()
@@ -237,7 +233,7 @@ class EconometricsController(BaseController):
                     if dataset_col != dataset_col2
                 ]
 
-            self.choices["granger"] = {c: None for c in pairs_timeseries}
+            self.choices["granger"] = {c: {} for c in pairs_timeseries}
 
             self.completer = NestedCompleter.from_nested_dict(self.choices)
 
@@ -246,48 +242,64 @@ class EconometricsController(BaseController):
         mt = MenuText("econometrics/")
         mt.add_param(
             "_data_loc",
-            f"\n\t{obbff.EXPORT_FOLDER_PATH}\n\t{Path('custom_imports').resolve()}",
+            f"\n\t{str(USER_EXPORTS_DIRECTORY)}\n\t{str(USER_CUSTOM_IMPORTS_DIRECTORY/'econometrics')}",
         )
         mt.add_raw("\n")
         mt.add_cmd("load")
-        mt.add_cmd("remove", "", self.files)
+        mt.add_cmd("remove", self.files)
         mt.add_raw("\n")
         mt.add_param("_loaded", self.loaded_dataset_cols)
 
         mt.add_info("_exploration_")
-        mt.add_cmd("show", "", self.files)
-        mt.add_cmd("plot", "", self.files)
-        mt.add_cmd("type", "", self.files)
-        mt.add_cmd("desc", "", self.files)
-        mt.add_cmd("index", "", self.files)
-        mt.add_cmd("clean", "", self.files)
-        mt.add_cmd("add", "", self.files)
-        mt.add_cmd("delete", "", self.files)
-        mt.add_cmd("combine", "", self.files)
-        mt.add_cmd("rename", "", self.files)
-        mt.add_cmd("export", "", self.files)
+        mt.add_cmd("show", self.files)
+        mt.add_cmd("plot", self.files)
+        mt.add_cmd("type", self.files)
+        mt.add_cmd("desc", self.files)
+        mt.add_cmd("index", self.files)
+        mt.add_cmd("clean", self.files)
+        mt.add_cmd("add", self.files)
+        mt.add_cmd("delete", self.files)
+        mt.add_cmd("combine", self.files)
+        mt.add_cmd("rename", self.files)
+        mt.add_cmd("export", self.files)
         mt.add_info("_tests_")
-        mt.add_cmd("norm", "", self.files)
-        mt.add_cmd("root", "", self.files)
-        mt.add_cmd("granger", "", self.files)
-        mt.add_cmd("coint", "", self.files)
+        mt.add_cmd("norm", self.files)
+        mt.add_cmd("root", self.files)
+        mt.add_cmd("granger", self.files)
+        mt.add_cmd("coint", self.files)
         mt.add_info("_regression_")
-        mt.add_cmd("ols", "", self.files)
-        mt.add_cmd("panel", "", self.files)
-        mt.add_cmd("compare", "", self.files)
+        mt.add_cmd("ols", self.files)
+        mt.add_cmd("panel", self.files)
+        mt.add_cmd("compare", self.files)
         mt.add_info("_regression_tests_")
-        mt.add_cmd("dwat", "", self.files and self.regression["OLS"]["model"])
-        mt.add_cmd("bgod", "", self.files and self.regression["OLS"]["model"])
-        mt.add_cmd("bpag", "", self.files and self.regression["OLS"]["model"])
+        mt.add_cmd("dwat", self.files and self.regression["OLS"]["model"])
+        mt.add_cmd("bgod", self.files and self.regression["OLS"]["model"])
+        mt.add_cmd("bpag", self.files and self.regression["OLS"]["model"])
 
         console.print(text=mt.menu_text, menu="Econometrics")
+        console.print()
 
     def custom_reset(self):
         """Class specific component of reset command"""
-        if self.files:
-            load_files = [f"load {file}" for file in self.files]
-            return ["econometrics"] + load_files
-        return []
+        return ["econometrics"]
+
+    def update_loaded(self):
+        self.list_dataset_cols = []
+        if not self.files:
+            self.loaded_dataset_cols = "\n"
+            self.list_dataset_cols.append("")
+            return
+
+        maxfile = max(len(file) for file in self.files)
+        self.loaded_dataset_cols = "\n"
+        for dataset, data in self.datasets.items():
+            max_files = (maxfile - len(dataset)) * " "
+            self.loaded_dataset_cols += (
+                f"\t{dataset} {max_files}: {', '.join(data.columns)}\n"
+            )
+
+            for col in data.columns:
+                self.list_dataset_cols.append(f"{dataset}.{col}")
 
     @log_start_end(log=logger)
     def call_load(self, other_args: List[str]):
@@ -296,12 +308,13 @@ class EconometricsController(BaseController):
             add_help=False,
             formatter_class=argparse.ArgumentDefaultsHelpFormatter,
             prog="load",
-            description="Load custom dataset (from previous export, custom imports or StatsModels).",
+            description="Load dataset (from previous export, custom imports or StatsModels).",
         )
         parser.add_argument(
             "-f",
             "--file",
-            help="File to load data in (can be custom import, may have been exported before or can be from Statsmodels)",
+            help="File to load data in (can be custom import, "
+            "may have been exported before or can be from Statsmodels)",
             type=str,
         )
         parser.add_argument(
@@ -323,12 +336,13 @@ class EconometricsController(BaseController):
 
         if other_args and "-" not in other_args[0][0]:
             other_args.insert(0, "-f")
+
         ns_parser = self.parse_known_args_and_warn(parser, other_args)
 
         if ns_parser:
             # show examples from statsmodels
             if ns_parser.examples:
-                df = pd.DataFrame.from_dict(self.DATA_EXAMPLES, orient="index")
+                df = pd.DataFrame.from_dict(common_model.DATA_EXAMPLES, orient="index")
                 print_rich_table(
                     df,
                     headers=list(["description"]),
@@ -338,70 +352,51 @@ class EconometricsController(BaseController):
                 )
                 return
 
-            if ns_parser.file:
-                possible_data = list(self.DATA_EXAMPLES.keys()) + list(
-                    self.DATA_FILES.keys()
-                )
-                if ns_parser.file not in possible_data:
-                    file = ""
-                    # Try to see if the user is just missing the extension
-                    for file_ext in list(self.DATA_FILES.keys()):
-                        if file_ext.startswith(ns_parser.file):
-                            # found the correct file
-                            file = file_ext
-                            break
+            if not ns_parser.file:
+                return
+            possible_data = list(common_model.DATA_EXAMPLES.keys()) + list(
+                self.DATA_FILES.keys()
+            )
+            if ns_parser.file not in possible_data:
+                file = ""
+                # Try to see if the user is just missing the extension
+                for file_ext in list(self.DATA_FILES.keys()):
+                    if file_ext.startswith(ns_parser.file):
+                        # found the correct file
+                        file = file_ext
+                        break
 
-                    if not file:
-                        console.print(
-                            "[red]The file/dataset selected does not exist.[/red]\n"
-                        )
-                        return
-                else:
-                    file = ns_parser.file
-
-                if ns_parser.alias:
-                    alias = ns_parser.alias
-                else:
-                    if "." in ns_parser.file:
-                        alias = ".".join(ns_parser.file.split(".")[:-1])
-                    else:
-                        alias = ns_parser.file
-
-                # check if this dataset has been added already
-                if alias in self.files:
+                if not file:
                     console.print(
-                        "[red]The file/dataset selected has already been loaded.[/red]\n"
+                        "[red]The file/dataset selected does not exist.[/red]"
                     )
                     return
+            else:
+                file = ns_parser.file
 
-                data = econometrics_model.load(
-                    file, self.file_types, self.DATA_FILES, self.DATA_EXAMPLES
+            if ns_parser.alias:
+                alias = ns_parser.alias
+            else:
+                if "." in ns_parser.file:
+                    alias = ".".join(ns_parser.file.split(".")[:-1])
+                else:
+                    alias = ns_parser.file
+
+            # check if this dataset has been added already
+            if alias in self.files:
+                console.print(
+                    "[red]The file/dataset selected has already been loaded.[/red]"
                 )
+                return
 
-                if not data.empty:
-                    data.columns = data.columns.map(
-                        lambda x: x.lower().replace(" ", "_")
-                    )
+            data = common_model.load(file, self.DATA_FILES, common_model.DATA_EXAMPLES)
 
-                    self.files.append(alias)
-                    self.datasets[alias] = data
-
-                    self.update_runtime_choices()
-
-                    # Process new datasets to be updated
-                    self.list_dataset_cols = list()
-                    maxfile = max(len(file) for file in self.files)
-                    self.loaded_dataset_cols = "\n"
-                    for dataset, data in self.datasets.items():
-                        self.loaded_dataset_cols += (
-                            f"  {dataset} {(maxfile - len(dataset)) * ' '}: "
-                            f"{', '.join(data.columns)}\n"
-                        )
-
-                        for col in data.columns:
-                            self.list_dataset_cols.append(f"{dataset}.{col}")
-
-                    console.print()
+            if not data.empty:
+                data.columns = data.columns.map(lambda x: x.lower().replace(" ", "_"))
+                self.files.append(alias)
+                self.datasets[alias] = data
+                self.update_runtime_choices()
+                self.update_loaded()
 
     @log_start_end(log=logger)
     def call_export(self, other_args: List[str]):
@@ -426,7 +421,7 @@ class EconometricsController(BaseController):
             "--type",
             help="The file type you wish to export to",
             dest="type",
-            choices=self.file_types,
+            choices=common_model.file_types,
             type=str,
             default="xlsx",
         )
@@ -472,6 +467,9 @@ class EconometricsController(BaseController):
             other_args.insert(0, "-n")
         ns_parser = self.parse_known_args_and_warn(parser, other_args, NO_EXPORT)
 
+        if not ns_parser:
+            return
+
         if not ns_parser.name:
             console.print("Please enter a valid dataset.\n")
             return
@@ -485,15 +483,7 @@ class EconometricsController(BaseController):
 
         self.update_runtime_choices()
 
-        # Process new datasets to be updated
-        self.list_dataset_cols = list()
-        maxfile = max(len(file) for file in self.files)
-        self.loaded_dataset_cols = "\n"
-        for dataset, data in self.datasets.items():
-            self.loaded_dataset_cols += f"\t{dataset} {(maxfile - len(dataset)) * ' '}: {', '.join(data.columns)}\n"
-
-            for col in data.columns:
-                self.list_dataset_cols.append(f"{dataset}.{col}")
+        self.update_loaded()
 
     @log_start_end(log=logger)
     def call_plot(self, other_args: List[str]):
@@ -550,20 +540,23 @@ class EconometricsController(BaseController):
 
         parser.add_argument(
             "-s",
-            "--sortcol",
+            "--sortby",
             help="Sort based on a column in the DataFrame",
-            nargs="+",
             type=str,
-            dest="sortcol",
+            dest="sortby",
             default="",
         )
         parser.add_argument(
-            "-a",
-            "--ascend",
-            help="Use this argument to sort in a descending order",
+            "-r",
+            "--reverse",
             action="store_true",
+            dest="reverse",
             default=False,
-            dest="ascend",
+            help=(
+                "Data is sorted in descending order by default. "
+                "Reverse flag will sort it in an ascending way. "
+                "Only works when raw data is displayed."
+            ),
         )
 
         if other_args and "-" not in other_args[0][0]:
@@ -585,14 +578,14 @@ class EconometricsController(BaseController):
                     return console.print(
                         f"[red]No data available for {ns_parser.name}.[/red]\n"
                     )
-                if ns_parser.sortcol:
-                    sort_column = " ".join(ns_parser.sortcol)
+                if ns_parser.sortby:
+                    sort_column = ns_parser.sortby
                     if sort_column not in self.datasets[name].columns:
                         console.print(
                             f"[red]{sort_column} not a valid column. Showing without sorting.\n[/red]"
                         )
                     else:
-                        df = df.sort_values(by=sort_column, ascending=ns_parser.ascend)
+                        df = df.sort_values(by=sort_column, ascending=ns_parser.reverse)
 
                 print_rich_table(
                     df.head(ns_parser.limit),
@@ -651,20 +644,24 @@ class EconometricsController(BaseController):
                     df,
                 )
             else:
-                df = self.datasets[ns_parser.name].describe()
-                print_rich_table(
-                    df,
-                    headers=self.datasets[ns_parser.name].columns,
-                    show_index=True,
-                    title=f"Statistics for dataset: '{ns_parser.name}'",
-                )
+                df = self.datasets[ns_parser.name]
+                if not df.empty:
+                    df = df.describe()
+                    print_rich_table(
+                        df,
+                        headers=self.datasets[ns_parser.name].columns,
+                        show_index=True,
+                        title=f"Statistics for dataset: '{ns_parser.name}'",
+                    )
 
-                export_data(
-                    ns_parser.export,
-                    os.path.dirname(os.path.abspath(__file__)),
-                    f"{ns_parser.name}_desc",
-                    df,
-                )
+                    export_data(
+                        ns_parser.export,
+                        os.path.dirname(os.path.abspath(__file__)),
+                        f"{ns_parser.name}_desc",
+                        df,
+                    )
+                else:
+                    console.print("Empty dataset")
 
     @log_start_end(log=logger)
     def call_type(self, other_args: List[str]):
@@ -684,7 +681,6 @@ class EconometricsController(BaseController):
             choices=self.choices["type"],
         )
         parser.add_argument(
-            "-f",
             "--format",
             type=str,
             choices=self.DATA_TYPES,
@@ -829,9 +825,10 @@ class EconometricsController(BaseController):
                     if len(columns) > 1 and dataset[columns[0]].isnull().any():
                         null_values = dataset[dataset[columns[0]].isnull()]
                         console.print(
-                            f"The column '{columns[0]}' contains {len(null_values)} NaN values. As multiple columns are "
-                            f"provided, it is assumed this column represents entities (i), the NaN values are "
-                            f"forward filled. Remove the -a argument to disable this."
+                            f"The column '{columns[0]}' contains {len(null_values)} NaN "
+                            "values. As multiple columns are provided, it is assumed this "
+                            "column represents entities (i), the NaN values are forward "
+                            "filled. Remove the -a argument to disable this."
                         )
                         dataset[columns[0]] = dataset[columns[0]].fillna(method="ffill")
                     if dataset[columns[-1]].isnull().any():
@@ -875,7 +872,6 @@ class EconometricsController(BaseController):
             choices=list(self.datasets.keys()),
         )
         parser.add_argument(
-            "-f",
             "--fill",
             help="The method of filling NaNs. This has options to fill rows (rfill, rbfill, rffill) or fill "
             "columns (cfill, cbfill, cffill). Furthermore, it has the option to forward fill and backward fill "
@@ -1010,6 +1006,7 @@ class EconometricsController(BaseController):
                 )
 
             self.update_runtime_choices()
+            self.update_loaded()
         console.print()
 
     @log_start_end(log=logger)
@@ -1025,7 +1022,7 @@ class EconometricsController(BaseController):
             "-d",
             "--delete",
             help="The columns you want to delete from a dataset. Use format: <dataset.column> or"
-            " multiple with <dataset.column>,<datasetb.column2>",
+            " multiple with <dataset.column>,<dataset.column2>",
             dest="delete",
             type=check_list_values(self.choices["delete"]),
         )
@@ -1073,7 +1070,7 @@ class EconometricsController(BaseController):
         parser.add_argument(
             "-c",
             "--columns",
-            help="The columns we want to add <dataset.column>,<datasetb.column2>",
+            help="The columns we want to add <dataset.column>,<dataset.column2>",
             dest="columns",
             type=check_list_values(self.choices["delete"]),
         )
@@ -1200,6 +1197,13 @@ class EconometricsController(BaseController):
             ),
             required="-h" not in other_args,
         )
+        parser.add_argument(
+            "--no-output",
+            action="store_true",
+            default=False,
+            help="Hide the output of the regression",
+            dest="no_output",
+        )
 
         if other_args and "-" not in other_args[0][0]:
             other_args.insert(0, "-d")
@@ -1210,21 +1214,30 @@ class EconometricsController(BaseController):
             if "," in ns_parser.dependent:
                 console.print(
                     "It appears you have selected multiple variables for the dependent variable. "
-                    "The model only accepts one.\nDid you intend to include these variables as independent "
+                    "Please select one.\nDid you intend to include these variables as independent "
                     f"variables? Use -i {ns_parser.dependent} in this case.\n"
                 )
             elif ns_parser.dependent in self.choices["regressions"]:
                 (
-                    self.regression["OLS"]["data"],
-                    self.regression["OLS"]["dependent"],
-                    self.regression["OLS"]["independent"],
-                    self.regression["OLS"]["model"],
-                ) = openbb_terminal.econometrics.regression_model.get_ols(
+                    regression_df,
+                    dependent_variable,
+                    independent_variables,
+                ) = regression_model.get_regression_data(
                     [ns_parser.dependent] + ns_parser.independent,
                     self.datasets,
-                    self.choices["regressions"],
-                    export=ns_parser.export,
+                    "OLS",
                 )
+                self.regression["OLS"]["data"] = regression_df
+                self.regression["OLS"]["dependent"] = dependent_variable
+                self.regression["OLS"]["independent"] = independent_variables
+                model = regression_model.get_ols(
+                    regression_df[dependent_variable],
+                    regression_df[independent_variables],
+                )
+                self.regression["OLS"]["model"] = model
+                if not ns_parser.no_output:
+                    console.print(model.summary())
+
             else:
                 console.print(
                     f"{ns_parser.dependent} not in {','.join(self.choices['regressions'])}\n"
@@ -1265,12 +1278,12 @@ class EconometricsController(BaseController):
         )
 
         if ns_parser and ns_parser.column:
-            column, dataset = self.choices["norm"][ns_parser.column].keys()
+            dataset, column = ns_parser.column.split(".")
 
             if isinstance(self.datasets[dataset][column].index, pd.MultiIndex):
                 return console.print(
-                    f"The column '{column}' from the dataset '{dataset}' is a MultiIndex. To test for normality in a "
-                    "timeseries, make sure to set a singular time index.\n"
+                    f"The column '{column}' in '{dataset}' is a MultiIndex. To test for normality"
+                    ", make sure to set a singular time index.\n"
                 )
 
             if dataset in self.datasets:
@@ -1285,7 +1298,7 @@ class EconometricsController(BaseController):
             else:
                 return console.print(f"Can not find {dataset}. Did you load the data?")
 
-            return econometrics_view.display_norm(
+            econometrics_view.display_norm(
                 data, dataset, column, ns_parser.plot, ns_parser.export
             )
 
@@ -1312,7 +1325,7 @@ class EconometricsController(BaseController):
             "-r",
             "--fuller_reg",
             help="Type of regression. Can be 'c','ct','ctt','nc'. c - Constant and t - trend order",
-            choices=["c", "ct", "ctt", "nc"],
+            choices=["c", "ct", "ctt", "n"],
             default="c",
             type=str,
             dest="fuller_reg",
@@ -1334,7 +1347,12 @@ class EconometricsController(BaseController):
         )
 
         if ns_parser and ns_parser.column:
-            column, dataset = self.choices["root"][ns_parser.column].keys()
+            if "." in ns_parser.column:
+                dataset, column = ns_parser.column.split(".")
+            else:
+                console.print(
+                    "[red]Column must be formatted as 'dataset.column'[/red]\n"
+                )
 
             if isinstance(self.datasets[dataset][column].index, pd.MultiIndex):
                 console.print(
@@ -1393,18 +1411,7 @@ class EconometricsController(BaseController):
             "-r",
             "--regression",
             type=str,
-            choices=[
-                "pols",
-                "re",
-                "bols",
-                "fe",
-                "fdols",
-                "POLS",
-                "RE",
-                "BOLS",
-                "FE",
-                "FDOLS",
-            ],
+            choices=self.PANEL_CHOICES,
             dest="type",
             help="The type of regression you wish to perform. This can be either pols (Pooled OLS), "
             "re (Random Effects), bols (Between OLS), fe (Fixed Effects) or fdols (First Difference OLS)",
@@ -1446,7 +1453,12 @@ class EconometricsController(BaseController):
 
                 if regression_vars and len(regression_vars) > 1:
                     for variable in regression_vars:
-                        column, dataset = self.choices["regressions"][variable].keys()
+                        if "." not in variable:
+                            console.print(
+                                "[red]Please follow the format 'dataset.column'[/red]\n"
+                            )
+                            continue
+                        dataset, column = variable.split(".")
                         if not isinstance(
                             self.datasets[dataset][column].index, pd.MultiIndex
                         ):
@@ -1461,7 +1473,7 @@ class EconometricsController(BaseController):
                             )
 
                     # Ensure that OLS is always ran to be able to perform tests
-                    regression_types = ["OLS", ns_parser.type.upper()]
+                    regression_types = [ns_parser.type.upper(), "OLS"]
 
                     for regression in regression_types:
                         regression_name = regression
@@ -1472,19 +1484,29 @@ class EconometricsController(BaseController):
                                 regression_name = regression_name + "_IE"
 
                         (
-                            self.regression[regression_name]["data"],
-                            self.regression[regression_name]["dependent"],
-                            self.regression[regression_name]["independent"],
-                            self.regression[regression_name]["model"],
-                        ) = openbb_terminal.econometrics.regression_view.display_panel(
-                            regression,
-                            regression_vars,
+                            regression_df,
+                            dependent_variable,
+                            independent_variables,
+                        ) = regression_model.get_regression_data(
+                            [ns_parser.dependent] + ns_parser.independent,
                             self.datasets,
-                            self.choices["regressions"],
+                            regression,
+                        )
+                        self.regression[regression]["data"] = regression_df
+                        self.regression[regression]["dependent"] = dependent_variable
+                        self.regression[regression][
+                            "independent"
+                        ] = independent_variables
+                        self.regression[regression_name][
+                            "model"
+                        ] = regression_view.display_panel(
+                            regression_df[dependent_variable],
+                            regression_df[independent_variables],
+                            regression,
                             ns_parser.entity_effects,
                             ns_parser.time_effects,
+                            ns_parser.export,
                         )
-                        console.print()
             else:
                 console.print(
                     f"{ns_parser.dependent} not in {','.join(self.choices['regressions'])}\n"
@@ -1504,9 +1526,7 @@ class EconometricsController(BaseController):
             parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
         )
         if ns_parser:
-            openbb_terminal.econometrics.regression_model.get_comparison(
-                self.regression, ns_parser.export
-            )
+            regression_model.get_comparison(self.regression, ns_parser.export)
             console.print()
 
     @log_start_end(log=logger)
@@ -1541,9 +1561,9 @@ class EconometricsController(BaseController):
                 dependent_variable = self.regression["OLS"]["data"][
                     self.regression["OLS"]["dependent"]
                 ]
-                openbb_terminal.econometrics.regression_view.display_dwat(
+                regression_view.display_dwat(
+                    self.regression["OLS"]["model"],
                     dependent_variable,
-                    self.regression["OLS"]["model"].resid,
                     ns_parser.plot,
                     ns_parser.export,
                 )
@@ -1578,10 +1598,10 @@ class EconometricsController(BaseController):
         if ns_parser:
             if not self.regression["OLS"]["model"]:
                 console.print(
-                    "Please perform an OLS regression before estimating the Breusch-Godfrey statistic.\n"
+                    "Perform an OLS regression before estimating the Breusch-Godfrey statistic.\n"
                 )
             else:
-                openbb_terminal.econometrics.regression_view.display_bgod(
+                regression_view.display_bgod(
                     self.regression["OLS"]["model"], ns_parser.lags, ns_parser.export
                 )
 
@@ -1593,7 +1613,7 @@ class EconometricsController(BaseController):
             formatter_class=argparse.ArgumentDefaultsHelpFormatter,
             prog="bpag",
             description=(
-                "Show Breusch-Pagan heteroscedasticity test results."
+                "Show Breusch-Pagan heteroscedasticity test results. "
                 "Needs OLS to be run in advance with independent and dependent variables"
             ),
         )
@@ -1605,10 +1625,10 @@ class EconometricsController(BaseController):
         if ns_parser:
             if not self.regression["OLS"]["model"]:
                 console.print(
-                    "Please perform an OLS regression before estimating the Breusch-Pagan statistic.\n"
+                    "Perform an OLS regression before estimating the Breusch-Pagan statistic.\n"
                 )
             else:
-                openbb_terminal.econometrics.regression_view.display_bpag(
+                regression_view.display_bpag(
                     self.regression["OLS"]["model"], ns_parser.export
                 )
 
@@ -1629,6 +1649,7 @@ class EconometricsController(BaseController):
             "by the second time series.",
             type=str,
             dest="ts",
+            metavar="Available time series",
         )
         parser.add_argument(
             "-l",
@@ -1711,18 +1732,24 @@ class EconometricsController(BaseController):
         if ns_parser:
 
             if ns_parser.ts:
-
-                if len(ns_parser.ts) > 2:
-                    datasets = {}
-                    for stock in ns_parser.ts:
-                        column, dataset = self.choices["coint"][stock].keys()
-                        datasets[stock] = self.datasets[dataset][column]
+                # We are going to pass through a variable number of series, so datasets will be a list of series
+                if len(ns_parser.ts) > 1:
+                    datasets = []
+                    for series in ns_parser.ts:
+                        if "." not in series:
+                            console.print(
+                                "[red]Invalid time series format. Should be dataset.column, "
+                                "e.g. historical.open[/red]\n"
+                            )
+                        else:
+                            dataset, column = series.split(".")
+                            datasets.append(self.datasets[dataset][column])
 
                     econometrics_view.display_cointegration_test(
-                        datasets,
-                        ns_parser.significant,
-                        ns_parser.plot,
-                        ns_parser.export,
+                        *datasets,
+                        significant=ns_parser.significant,
+                        plot=ns_parser.plot,
+                        export=ns_parser.export,
                     )
 
                 else:

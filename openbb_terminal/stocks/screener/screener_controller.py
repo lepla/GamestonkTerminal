@@ -2,47 +2,46 @@
 __docformat__ = "numpy"
 
 import argparse
-import configparser
 import datetime
 import logging
-import os
+from pathlib import Path
 from typing import List
 
-from prompt_toolkit.completion import NestedCompleter
+from openbb_terminal.custom_prompt_toolkit import NestedCompleter
 
 from openbb_terminal import feature_flags as obbff
+from openbb_terminal.core.config.paths import USER_PRESETS_DIRECTORY
 from openbb_terminal.decorators import log_start_end
-from openbb_terminal.helper_classes import AllowArgsWithWhiteSpace
 from openbb_terminal.helper_funcs import (
     EXPORT_BOTH_RAW_DATA_AND_FIGURES,
     EXPORT_ONLY_RAW_DATA_ALLOWED,
     check_positive,
     valid_date,
+    parse_and_split_input,
 )
 from openbb_terminal.menu import session
 from openbb_terminal.parent_classes import BaseController
-from openbb_terminal.portfolio.portfolio_optimization import po_controller
 from openbb_terminal.rich_config import console, MenuText
 from openbb_terminal.stocks.comparison_analysis import ca_controller
 from openbb_terminal.stocks.screener import (
     finviz_model,
     finviz_view,
     yahoofinance_view,
+    screener_view,
+    screener_helper,
 )
 
 logger = logging.getLogger(__name__)
 
-presets_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), "presets/")
-
 # pylint: disable=E1121
 
-# TODO: HELP WANTED! This menu required some refactoring. Things that can be addressed:
-#       - better preset management (MVC style).
-#       - decoupling view and model in the yfinance_view
+PRESETS_PATH = USER_PRESETS_DIRECTORY / "stocks" / "screener"
 
 
 class ScreenerController(BaseController):
     """Screener Controller class"""
+
+    CHOICES_MENUS = ["ca"]
 
     CHOICES_COMMANDS = [
         "view",
@@ -54,55 +53,53 @@ class ScreenerController(BaseController):
         "ownership",
         "performance",
         "technical",
-        "po",
-        "ca",
     ]
 
-    preset_choices = [
-        preset.split(".")[0]
-        for preset in os.listdir(presets_path)
-        if preset[-4:] == ".ini"
-    ]
+    PRESETS_PATH_DEFAULT = Path(__file__).parent / "presets"
+    preset_choices = {
+        filepath.name.replace(".ini", ""): filepath
+        for filepath in PRESETS_PATH.iterdir()
+        if filepath.suffix == ".ini"
+    }
+    preset_choices.update(
+        {
+            filepath.name.replace(".ini", ""): filepath
+            for filepath in PRESETS_PATH_DEFAULT.iterdir()
+            if filepath.suffix == ".ini"
+        }
+    )
+    preset_choices.update(finviz_model.d_signals)
 
     historical_candle_choices = ["o", "h", "l", "c", "a"]
     PATH = "/stocks/scr/"
+    CHOICES_GENERATION = True
 
     def __init__(self, queue: List[str] = None):
         """Constructor"""
         super().__init__(queue)
 
-        self.preset = "top_gainers"
+        self.preset = "top_gainers.ini"
         self.screen_tickers: List = list()
 
         if session and obbff.USE_PROMPT_TOOLKIT:
-            choices: dict = {c: {} for c in self.controller_choices}
-            choices["view"] = {c: None for c in self.preset_choices}
-            choices["set"] = {
-                c: None
-                for c in self.preset_choices + list(finviz_model.d_signals.keys())
-            }
-            choices["historical"]["-t"] = {
-                c: None for c in self.historical_candle_choices
-            }
-            choices["overview"]["-s"] = {
-                c: None for c in finviz_view.d_cols_to_sort["overview"]
-            }
-            choices["valuation"]["-s"] = {
-                c: None for c in finviz_view.d_cols_to_sort["valuation"]
-            }
-            choices["financial"]["-s"] = {
-                c: None for c in finviz_view.d_cols_to_sort["financial"]
-            }
-            choices["ownership"]["-s"] = {
-                c: None for c in finviz_view.d_cols_to_sort["ownership"]
-            }
-            choices["performance"]["-s"] = {
-                c: None for c in finviz_view.d_cols_to_sort["performance"]
-            }
-            choices["technical"]["-s"] = {
-                c: None for c in finviz_view.d_cols_to_sort["technical"]
-            }
+            choices: dict = self.choices_default
             self.completer = NestedCompleter.from_nested_dict(choices)
+
+    def parse_input(self, an_input: str) -> List:
+        """Parse controller input
+
+        Overrides the parent class function to handle github org/repo path convention.
+        See `BaseController.parse_input()` for details.
+        """
+        # Filtering out sorting parameters with forward slashes like P/E
+        sort_filter = r"((\ -s |\ --sort ).*?(P\/E|Fwd P\/E|P\/S|P\/B|P\/C|P\/FCF)*)"
+
+        custom_filters = [sort_filter]
+
+        commands = parse_and_split_input(
+            an_input=an_input, custom_filters=custom_filters
+        )
+        return commands
 
     def print_help(self):
         """Print help"""
@@ -123,7 +120,6 @@ class ScreenerController(BaseController):
         mt.add_param("_screened_tickers", ", ".join(self.screen_tickers))
         mt.add_raw("\n")
         mt.add_menu("ca", self.screen_tickers)
-        mt.add_menu("po", self.screen_tickers)
         console.print(text=mt.menu_text, menu="Stocks - Screener")
 
     @log_start_end(log=logger)
@@ -143,49 +139,18 @@ class ScreenerController(BaseController):
             help="View specific custom preset",
             default="",
             choices=self.preset_choices,
+            metavar="Desired preset.",
         )
         if other_args and "-" not in other_args[0][0]:
             other_args.insert(0, "-p")
         ns_parser = self.parse_known_args_and_warn(parser, other_args)
         if ns_parser:
             if ns_parser.preset:
-                preset_filter = configparser.RawConfigParser()
-                preset_filter.optionxform = str  # type: ignore
-                preset_filter.read(presets_path + ns_parser.preset + ".ini")
-
-                filters_headers = ["General", "Descriptive", "Fundamental", "Technical"]
-
-                console.print("")
-                for filter_header in filters_headers:
-                    console.print(f" - {filter_header} -")
-                    d_filters = {**preset_filter[filter_header]}
-                    d_filters = {k: v for k, v in d_filters.items() if v}
-                    if d_filters:
-                        max_len = len(max(d_filters, key=len))
-                        for key, value in d_filters.items():
-                            console.print(f"{key}{(max_len-len(key))*' '}: {value}")
-                    console.print("")
-
-            else:
-                console.print("\nCustom Presets:")
-                for preset in self.preset_choices:
-                    with open(
-                        presets_path + preset + ".ini",
-                        encoding="utf8",
-                    ) as f:
-                        description = ""
-                        for line in f:
-                            if line.strip() == "[General]":
-                                break
-                            description += line.strip()
-                    console.print(
-                        f"   {preset}{(50-len(preset)) * ' '}{description.split('Description: ')[1].replace('#', '')}"
-                    )
-
-                console.print("\nDefault Presets:")
-                for signame, sigdesc in finviz_model.d_signals_desc.items():
-                    console.print(f"   {signame}{(50-len(signame)) * ' '}{sigdesc}")
-                console.print("")
+                if ns_parser.preset in finviz_model.d_signals:
+                    console.print("This is a Finviz preset.\n")
+                    return
+                ns_parser.preset += ".ini"
+            screener_view.display_presets(ns_parser.preset)
 
     @log_start_end(log=logger)
     def call_set(self, other_args: List[str]):
@@ -203,14 +168,14 @@ class ScreenerController(BaseController):
             type=str,
             default="template",
             help="Filter presets",
-            choices=self.preset_choices + list(finviz_model.d_signals.keys()),
+            choices=self.preset_choices,
+            metavar="Desired preset.",
         )
         if other_args and "-" not in other_args[0][0]:
             other_args.insert(0, "-p")
         ns_parser = self.parse_known_args_and_warn(parser, other_args)
         if ns_parser:
-            self.preset = ns_parser.preset
-        console.print("")
+            self.preset = ns_parser.preset + ".ini"
 
     @log_start_end(log=logger)
     def call_historical(self, other_args: List[str]):
@@ -242,7 +207,9 @@ class ScreenerController(BaseController):
             "-s",
             "--start",
             type=valid_date,
-            default=datetime.datetime.now() - datetime.timedelta(days=6 * 30),
+            default=(
+                datetime.datetime.now() - datetime.timedelta(days=6 * 30)
+            ).strftime("%Y-%m-%d"),
             dest="start",
             help="The starting date (format YYYY-MM-DD) of the historical price to plot",
         )
@@ -261,8 +228,12 @@ class ScreenerController(BaseController):
             parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES
         )
         if ns_parser:
+            if self.preset.strip(".ini") in finviz_model.d_signals:
+                preset = self.preset.strip(".ini")
+            else:
+                preset = self.preset
             self.screen_tickers = yahoofinance_view.historical(
-                self.preset,
+                preset,
                 ns_parser.limit,
                 ns_parser.start,
                 ns_parser.type_candle,
@@ -288,7 +259,8 @@ class ScreenerController(BaseController):
             type=str,
             default=self.preset,
             help="Filter presets",
-            choices=self.preset_choices + list(finviz_model.d_signals.keys()),
+            choices=self.preset_choices,
+            metavar="Desired preset.",
         )
         parser.add_argument(
             "-l",
@@ -300,20 +272,25 @@ class ScreenerController(BaseController):
             help="Limit of stocks to print",
         )
         parser.add_argument(
-            "-a",
-            "--ascend",
+            "-r",
+            "--reverse",
             action="store_true",
+            dest="reverse",
             default=False,
-            dest="ascend",
-            help="Set order to Ascend, the default is Descend",
+            help=(
+                "Data is sorted in descending order by default. "
+                "Reverse flag will sort it in an ascending way. "
+                "Only works when raw data is displayed."
+            ),
         )
         parser.add_argument(
             "-s",
             "--sort",
-            action=AllowArgsWithWhiteSpace,
+            choices=screener_helper.finviz_choices("overview"),
+            type=str.lower,
             dest="sort",
-            default="",
-            nargs="+",
+            metavar="SORT",
+            default="Ticker",
             help="Sort elements of the table.",
         )
         if other_args and "-" not in other_args[0][0]:
@@ -323,29 +300,20 @@ class ScreenerController(BaseController):
         )
 
         if ns_parser:
-            if ns_parser.sort:
-                if ns_parser.sort not in finviz_view.d_cols_to_sort["overview"]:
-                    console.print(f"{ns_parser.sort} not a valid sort choice.\n")
-                else:
-                    self.screen_tickers = finviz_view.screener(
-                        loaded_preset=self.preset,
-                        data_type="overview",
-                        limit=ns_parser.limit,
-                        ascend=ns_parser.ascend,
-                        sort=ns_parser.sort,
-                        export=ns_parser.export,
-                    )
-
+            if self.preset.strip(".ini") in finviz_model.d_signals:
+                preset = self.preset.strip(".ini")
             else:
+                preset = self.preset
 
-                self.screen_tickers = finviz_view.screener(
-                    loaded_preset=self.preset,
-                    data_type="overview",
-                    limit=ns_parser.limit,
-                    ascend=ns_parser.ascend,
-                    sort=ns_parser.sort,
-                    export=ns_parser.export,
-                )
+            sort_map = screener_helper.finviz_map("overview")
+            self.screen_tickers = finviz_view.screener(
+                loaded_preset=preset,
+                data_type="overview",
+                limit=ns_parser.limit,
+                ascend=ns_parser.reverse,
+                sortby=sort_map[ns_parser.sort],
+                export=ns_parser.export,
+            )
 
     @log_start_end(log=logger)
     def call_valuation(self, other_args: List[str]):
@@ -365,7 +333,8 @@ class ScreenerController(BaseController):
             type=str,
             default=self.preset,
             help="Filter presets",
-            choices=self.preset_choices + list(finviz_model.d_signals.keys()),
+            choices=self.preset_choices,
+            metavar="Desired preset.",
         )
         parser.add_argument(
             "-l",
@@ -377,20 +346,25 @@ class ScreenerController(BaseController):
             help="Limit of stocks to print",
         )
         parser.add_argument(
-            "-a",
-            "--ascend",
+            "-r",
+            "--reverse",
             action="store_true",
+            dest="reverse",
             default=False,
-            dest="ascend",
-            help="Set order to Ascend, the default is Descend",
+            help=(
+                "Data is sorted in descending order by default. "
+                "Reverse flag will sort it in an ascending way. "
+                "Only works when raw data is displayed."
+            ),
         )
         parser.add_argument(
             "-s",
             "--sort",
             dest="sort",
-            default="",
-            nargs="+",
-            action=AllowArgsWithWhiteSpace,
+            default="Ticker",
+            choices=screener_helper.finviz_choices("valuation"),
+            type=str.lower,
+            metavar="SORT",
             help="Sort elements of the table.",
         )
         if other_args and "-" not in other_args[0][0]:
@@ -400,29 +374,19 @@ class ScreenerController(BaseController):
         )
 
         if ns_parser:
-            if ns_parser.sort:
-                if ns_parser.sort not in finviz_view.d_cols_to_sort["valuation"]:
-                    console.print(f"{ns_parser.sort} not a valid sort choice.\n")
-                else:
-                    self.screen_tickers = finviz_view.screener(
-                        loaded_preset=self.preset,
-                        data_type="valuation",
-                        limit=ns_parser.limit,
-                        ascend=ns_parser.ascend,
-                        sort=ns_parser.sort,
-                        export=ns_parser.export,
-                    )
-
+            if self.preset.strip(".ini") in finviz_model.d_signals:
+                preset = self.preset.strip(".ini")
             else:
-
-                self.screen_tickers = finviz_view.screener(
-                    loaded_preset=self.preset,
-                    data_type="valuation",
-                    limit=ns_parser.limit,
-                    ascend=ns_parser.ascend,
-                    sort=ns_parser.sort,
-                    export=ns_parser.export,
-                )
+                preset = self.preset
+            sort_map = screener_helper.finviz_map("valuation")
+            self.screen_tickers = finviz_view.screener(
+                loaded_preset=preset,
+                data_type="valuation",
+                limit=ns_parser.limit,
+                ascend=ns_parser.reverse,
+                sortby=sort_map[ns_parser.sort],
+                export=ns_parser.export,
+            )
 
     @log_start_end(log=logger)
     def call_financial(self, other_args: List[str]):
@@ -442,7 +406,8 @@ class ScreenerController(BaseController):
             type=str,
             default=self.preset,
             help="Filter presets",
-            choices=self.preset_choices + list(finviz_model.d_signals.keys()),
+            choices=self.preset_choices,
+            metavar="Desired preset.",
         )
         parser.add_argument(
             "-l",
@@ -453,22 +418,26 @@ class ScreenerController(BaseController):
             default=10,
             help="Limit of stocks to print",
         )
-
         parser.add_argument(
-            "-a",
-            "--ascend",
+            "-r",
+            "--reverse",
             action="store_true",
+            dest="reverse",
             default=False,
-            dest="ascend",
-            help="Set order to Ascend, the default is Descend",
+            help=(
+                "Data is sorted in descending order by default. "
+                "Reverse flag will sort it in an ascending way. "
+                "Only works when raw data is displayed."
+            ),
         )
         parser.add_argument(
             "-s",
             "--sort",
-            action=AllowArgsWithWhiteSpace,
+            choices=screener_helper.finviz_choices("financial"),
+            type=str.lower,
             dest="sort",
-            default="",
-            nargs="+",
+            metavar="SORT",
+            default="Ticker",
             help="Sort elements of the table.",
         )
         if other_args and "-" not in other_args[0][0]:
@@ -478,29 +447,19 @@ class ScreenerController(BaseController):
         )
 
         if ns_parser:
-            if ns_parser.sort:
-                if ns_parser.sort not in finviz_view.d_cols_to_sort["financial"]:
-                    console.print(f"{ns_parser.sort} not a valid sort choice.\n")
-                else:
-                    self.screen_tickers = finviz_view.screener(
-                        loaded_preset=self.preset,
-                        data_type="financial",
-                        limit=ns_parser.limit,
-                        ascend=ns_parser.ascend,
-                        sort=ns_parser.sort,
-                        export=ns_parser.export,
-                    )
-
+            if self.preset.strip(".ini") in finviz_model.d_signals:
+                preset = self.preset.strip(".ini")
             else:
-
-                self.screen_tickers = finviz_view.screener(
-                    loaded_preset=self.preset,
-                    data_type="financial",
-                    limit=ns_parser.limit,
-                    ascend=ns_parser.ascend,
-                    sort=ns_parser.sort,
-                    export=ns_parser.export,
-                )
+                preset = self.preset
+            sort_map = screener_helper.finviz_map("financial")
+            self.screen_tickers = finviz_view.screener(
+                loaded_preset=preset,
+                data_type="financial",
+                limit=ns_parser.limit,
+                ascend=ns_parser.reverse,
+                sortby=sort_map[ns_parser.sort],
+                export=ns_parser.export,
+            )
 
     @log_start_end(log=logger)
     def call_ownership(self, other_args: List[str]):
@@ -520,7 +479,8 @@ class ScreenerController(BaseController):
             type=str,
             default=self.preset,
             help="Filter presets",
-            choices=self.preset_choices + list(finviz_model.d_signals.keys()),
+            choices=self.preset_choices,
+            metavar="Desired preset.",
         )
         parser.add_argument(
             "-l",
@@ -532,20 +492,25 @@ class ScreenerController(BaseController):
             help="Limit of stocks to print",
         )
         parser.add_argument(
-            "-a",
-            "--ascend",
+            "-r",
+            "--reverse",
             action="store_true",
+            dest="reverse",
             default=False,
-            dest="ascend",
-            help="Set order to Ascend, the default is Descend",
+            help=(
+                "Data is sorted in descending order by default. "
+                "Reverse flag will sort it in an ascending way. "
+                "Only works when raw data is displayed."
+            ),
         )
         parser.add_argument(
             "-s",
             "--sort",
             dest="sort",
-            default="",
-            nargs="+",
-            action=AllowArgsWithWhiteSpace,
+            metavar="SORT",
+            default="Ticker",
+            choices=screener_helper.finviz_choices("ownership"),
+            type=str.lower,
             help="Sort elements of the table.",
         )
         if other_args and "-" not in other_args[0][0]:
@@ -555,30 +520,19 @@ class ScreenerController(BaseController):
         )
 
         if ns_parser:
-
-            if ns_parser.sort:
-                if ns_parser.sort not in finviz_view.d_cols_to_sort["ownership"]:
-                    console.print(f"{ns_parser.sort} not a valid sort choice.\n")
-                else:
-                    self.screen_tickers = finviz_view.screener(
-                        loaded_preset=self.preset,
-                        data_type="ownership",
-                        limit=ns_parser.limit,
-                        ascend=ns_parser.ascend,
-                        sort=ns_parser.sort,
-                        export=ns_parser.export,
-                    )
-
+            if self.preset.strip(".ini") in finviz_model.d_signals:
+                preset = self.preset.strip(".ini")
             else:
-
-                self.screen_tickers = finviz_view.screener(
-                    loaded_preset=self.preset,
-                    data_type="ownership",
-                    limit=ns_parser.limit,
-                    ascend=ns_parser.ascend,
-                    sort=ns_parser.sort,
-                    export=ns_parser.export,
-                )
+                preset = self.preset
+            sort_map = screener_helper.finviz_map("ownership")
+            self.screen_tickers = finviz_view.screener(
+                loaded_preset=preset,
+                data_type="ownership",
+                limit=ns_parser.limit,
+                ascend=ns_parser.reverse,
+                sortby=sort_map[ns_parser.sort],
+                export=ns_parser.export,
+            )
 
     @log_start_end(log=logger)
     def call_performance(self, other_args: List[str]):
@@ -598,7 +552,8 @@ class ScreenerController(BaseController):
             type=str,
             default=self.preset,
             help="Filter presets",
-            choices=self.preset_choices + list(finviz_model.d_signals.keys()),
+            choices=self.preset_choices,
+            metavar="Desired preset.",
         )
         parser.add_argument(
             "-l",
@@ -610,20 +565,25 @@ class ScreenerController(BaseController):
             help="Limit of stocks to print",
         )
         parser.add_argument(
-            "-a",
-            "--ascend",
+            "-r",
+            "--reverse",
             action="store_true",
+            dest="reverse",
             default=False,
-            dest="ascend",
-            help="Set order to Ascend, the default is Descend",
+            help=(
+                "Data is sorted in descending order by default. "
+                "Reverse flag will sort it in an ascending way. "
+                "Only works when raw data is displayed."
+            ),
         )
         parser.add_argument(
             "-s",
             "--sort",
-            action=AllowArgsWithWhiteSpace,
+            choices=screener_helper.finviz_choices("performance"),
+            type=str.lower,
             dest="sort",
-            default="",
-            nargs="+",
+            default="Ticker",
+            metavar="SORTBY",
             help="Sort elements of the table.",
         )
         if other_args and "-" not in other_args[0][0]:
@@ -632,31 +592,20 @@ class ScreenerController(BaseController):
             parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
         )
 
+        sort_map = screener_helper.finviz_map("performance")
         if ns_parser:
-
-            if ns_parser.sort:
-                if ns_parser.sort not in finviz_view.d_cols_to_sort["performance"]:
-                    console.print(f"{ns_parser.sort} not a valid sort choice.\n")
-                else:
-                    self.screen_tickers = finviz_view.screener(
-                        loaded_preset=self.preset,
-                        data_type="performance",
-                        limit=ns_parser.limit,
-                        ascend=ns_parser.ascend,
-                        sort=ns_parser.sort,
-                        export=ns_parser.export,
-                    )
-
+            if self.preset.strip(".ini") in finviz_model.d_signals:
+                preset = self.preset.strip(".ini")
             else:
-
-                self.screen_tickers = finviz_view.screener(
-                    loaded_preset=self.preset,
-                    data_type="performance",
-                    limit=ns_parser.limit,
-                    ascend=ns_parser.ascend,
-                    sort=ns_parser.sort,
-                    export=ns_parser.export,
-                )
+                preset = self.preset
+            self.screen_tickers = finviz_view.screener(
+                loaded_preset=preset,
+                data_type="performance",
+                limit=ns_parser.limit,
+                ascend=ns_parser.reverse,
+                sortby=sort_map[ns_parser.sort],
+                export=ns_parser.export,
+            )
 
     @log_start_end(log=logger)
     def call_technical(self, other_args: List[str]):
@@ -676,7 +625,8 @@ class ScreenerController(BaseController):
             type=str,
             default=self.preset,
             help="Filter presets",
-            choices=self.preset_choices + list(finviz_model.d_signals.keys()),
+            choices=self.preset_choices,
+            metavar="Desired preset.",
         )
         parser.add_argument(
             "-l",
@@ -688,20 +638,24 @@ class ScreenerController(BaseController):
             help="Limit of stocks to print",
         )
         parser.add_argument(
-            "-a",
-            "--ascend",
+            "-r",
+            "--reverse",
             action="store_true",
+            dest="reverse",
             default=False,
-            dest="ascend",
-            help="Set order to Ascend, the default is Descend",
+            help=(
+                "Data is sorted in descending order by default. "
+                "Reverse flag will sort it in an ascending way. "
+                "Only works when raw data is displayed."
+            ),
         )
         parser.add_argument(
             "-s",
             "--sort",
-            action=AllowArgsWithWhiteSpace,
+            choices=screener_helper.finviz_choices("technical"),
+            type=str.lower,
             dest="sort",
-            default="",
-            nargs="+",
+            default="Ticker",
             help="Sort elements of the table.",
         )
         if other_args and "-" not in other_args[0][0]:
@@ -711,51 +665,31 @@ class ScreenerController(BaseController):
         )
 
         if ns_parser:
-
-            if ns_parser.sort:
-                if ns_parser.sort not in finviz_view.d_cols_to_sort["technical"]:
-                    console.print(f"{ns_parser.sort} not a valid sort choice.\n")
-                else:
-                    self.screen_tickers = finviz_view.screener(
-                        loaded_preset=self.preset,
-                        data_type="technical",
-                        limit=ns_parser.limit,
-                        ascend=ns_parser.ascend,
-                        sort=ns_parser.sort,
-                        export=ns_parser.export,
-                    )
-
+            if self.preset.strip(".ini") in finviz_model.d_signals:
+                preset = self.preset.strip(".ini")
             else:
-
-                self.screen_tickers = finviz_view.screener(
-                    loaded_preset=self.preset,
-                    data_type="technical",
-                    limit=ns_parser.limit,
-                    ascend=ns_parser.ascend,
-                    sort=ns_parser.sort,
-                    export=ns_parser.export,
-                )
-
-    @log_start_end(log=logger)
-    def call_po(self, _):
-        """Call the portfolio optimization menu with selected tickers"""
-        if self.screen_tickers:
-            self.queue = po_controller.PortfolioOptimizationController(
-                self.screen_tickers
-            ).menu(custom_path_menu_above="/portfolio/")
-        else:
-            console.print(
-                "Some tickers must be screened first through one of the presets!\n"
+                preset = self.preset
+            sort_map = screener_helper.finviz_map("technical")
+            self.screen_tickers = finviz_view.screener(
+                loaded_preset=preset,
+                data_type="technical",
+                limit=ns_parser.limit,
+                ascend=ns_parser.reverse,
+                sortby=sort_map[ns_parser.sort],
+                export=ns_parser.export,
             )
 
     @log_start_end(log=logger)
     def call_ca(self, _):
         """Call the comparison analysis menu with selected tickers"""
         if self.screen_tickers:
-            self.queue = ca_controller.ComparisonAnalysisController(
-                self.screen_tickers, self.queue
-            ).menu(custom_path_menu_above="/stocks/")
+            self.queue = self.load_class(
+                ca_controller.ComparisonAnalysisController,
+                self.screen_tickers,
+                self.queue,
+            )
         else:
             console.print(
-                "Some tickers must be screened first through one of the presets!\n"
+                "Please select a screener using 'set' and then run 'historical' "
+                "before going to the CA menu.\n"
             )

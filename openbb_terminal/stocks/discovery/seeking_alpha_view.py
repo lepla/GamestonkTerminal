@@ -16,14 +16,16 @@ logger = logging.getLogger(__name__)
 
 
 @log_start_end(log=logger)
-def upcoming_earning_release_dates(num_pages: int, num_earnings: int, export: str):
+def upcoming_earning_release_dates(
+    num_pages: int = 5, limit: int = 1, export: str = ""
+):
     """Displays upcoming earnings release dates
 
     Parameters
     ----------
     num_pages: int
         Number of pages to scrap
-    num_earnings: int
+    limit: int
         Number of upcoming earnings release dates
     export : str
         Export dataframe data to csv,json,xlsx file
@@ -34,13 +36,16 @@ def upcoming_earning_release_dates(num_pages: int, num_earnings: int, export: st
 
     df_earnings = seeking_alpha_model.get_next_earnings(num_pages)
 
+    if df_earnings.empty:
+        console.print("No upcoming earnings release dates found")
+
     pd.set_option("display.max_colwidth", None)
     if export:
         l_earnings = []
         l_earnings_dates = []
 
     for n_days, earning_date in enumerate(df_earnings.index.unique()):
-        if n_days > (num_earnings - 1):
+        if n_days > (limit - 1):
             break
 
         # TODO: Potentially extract Market Cap for each Ticker, and sort
@@ -69,8 +74,8 @@ def upcoming_earning_release_dates(num_pages: int, num_earnings: int, export: st
         )
 
     if export:
-        for i, _ in enumerate(l_earnings):
-            l_earnings[i].reset_index(drop=True, inplace=True)
+        for item in l_earnings:
+            item.reset_index(drop=True, inplace=True)
         df_data = pd.concat(l_earnings, axis=1, ignore_index=True)
         df_data.columns = l_earnings_dates
 
@@ -83,22 +88,21 @@ def upcoming_earning_release_dates(num_pages: int, num_earnings: int, export: st
 
 
 @log_start_end(log=logger)
-def news(article_id: int, num: int, export: str):
+def news(article_id: int = -1, limit: int = 5, export: str = ""):
     """Prints the latest news article list. [Source: Seeking Alpha]
 
     Parameters
     ----------
     article_id: int
         Article ID. If -1, none is selected
-    num: int
+    limit: int
         Number of articles to display. Only used if article_id is -1.
-
     export : str
         Export dataframe data to csv,json,xlsx file
     """
     # User wants to see all latest news
     if article_id == -1:
-        articles = seeking_alpha_model.get_trending_list(num)
+        articles = seeking_alpha_model.get_trending_list(limit)
 
         if export:
             df_articles = pd.DataFrame(articles)
@@ -112,9 +116,9 @@ def news(article_id: int, num: int, export: str):
                 article["title"],
             )
             console.print(article["url"])
-            console.print("")
+            console.print("\n")
 
-            if idx >= num - 1:
+            if idx >= limit - 1:
                 break
 
     # User wants to access specific article
@@ -132,7 +136,7 @@ def news(article_id: int, num: int, export: str):
             article["title"],
         )
         console.print(article["url"])
-        console.print("")
+        console.print("\n")
         console.print(article["content"])
 
     if export:
@@ -145,7 +149,7 @@ def news(article_id: int, num: int, export: str):
 
 
 @log_start_end(log=logger)
-def display_news(news_type: str = "Top-News", num: int = 5, export: str = ""):
+def display_news(news_type: str = "Top-News", limit: int = 5, export: str = ""):
     """Display news. [Source: SeekingAlpha]
 
     Parameters
@@ -153,12 +157,12 @@ def display_news(news_type: str = "Top-News", num: int = 5, export: str = ""):
     news_type : str
         From: Top-News, On-The-Move, Market-Pulse, Notable-Calls, Buybacks, Commodities, Crypto, Issuance, Global,
         Guidance, IPOs, SPACs, Politics, M-A, Consumer, Energy, Financials, Healthcare, MLPs, REITs, Technology
-    num : int
+    limit : int
         Number of news to display
     export : str
         Export dataframe data to csv,json,xlsx file
     """
-    news_to_display: List = seeking_alpha_model.get_news(news_type, num)
+    news_to_display: List = seeking_alpha_model.get_news(news_type, limit)
 
     if not news:
         console.print("No news found.", "\n")
@@ -173,7 +177,7 @@ def display_news(news_type: str = "Top-News", num: int = 5, export: str = ""):
                 + news_element["title"]
             )
             console.print(news_element["url"])
-            console.print("")
+            console.print("\n")
 
         export_data(
             export,

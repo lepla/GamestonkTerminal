@@ -1,13 +1,14 @@
 """Optimization View"""
 __docformat__ = "numpy"
 
-# pylint: disable=R0913, R0914, C0302, too-many-branches, too-many-statements
+# pylint: disable=R0913, R0914, C0302, too-many-branches, too-many-statements, line-too-long
+# flake8: noqa: E501
 
 import logging
 import math
 import warnings
 from datetime import date
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -17,15 +18,14 @@ import riskfolio as rp
 from dateutil.relativedelta import relativedelta, FR
 from matplotlib.gridspec import GridSpec
 from matplotlib.lines import Line2D
-from scipy.interpolate import interp1d
 
 from openbb_terminal.config_plot import PLOT_DPI
 from openbb_terminal.config_terminal import theme
 from openbb_terminal.decorators import log_start_end
 from openbb_terminal.helper_funcs import plot_autoscale, print_rich_table
 from openbb_terminal.portfolio.portfolio_optimization import (
+    optimizer_helper,
     optimizer_model,
-    yahoo_finance_model,
 )
 from openbb_terminal.rich_config import console
 
@@ -109,18 +109,18 @@ dict_conversion = {"period": "historic_period", "start": "start_period"}
 
 
 @log_start_end(log=logger)
-def d_period(period: str, start: str, end: str):
+def d_period(interval: str = "1y", start_date: str = "", end_date: str = ""):
     """
     Builds a date range string
 
     Parameters
     ----------
-    period : str
-        Period starting today
-    start: str
-        If not using period, start date string (YYYY-MM-DD)
-    end: str
-        If not using period, end date string (YYYY-MM-DD). If empty use last
+    interval : str
+        interval starting today
+    start_date: str
+        If not using interval, start date string (YYYY-MM-DD)
+    end_date: str
+        If not using interval, end date string (YYYY-MM-DD). If empty use last
         weekday.
     """
     extra_choices = {
@@ -128,27 +128,27 @@ def d_period(period: str, start: str, end: str):
         "max": "[All-time]",
     }
 
-    if start == "":
-        if period in extra_choices:
-            p = extra_choices[period]
+    if start_date == "":
+        if interval in extra_choices:
+            p = extra_choices[interval]
         else:
-            if period[-1] == "d":
-                p = "[" + period[:-1] + " Days]"
-            elif period[-1] == "w":
-                p = "[" + period[:-1] + " Weeks]"
-            elif period[-1] == "o":
-                p = "[" + period[:-2] + " Months]"
-            elif period[-1] == "y":
-                p = "[" + period[:-1] + " Years]"
+            if interval[-1] == "d":
+                p = "[" + interval[:-1] + " Days]"
+            elif interval[-1] == "w":
+                p = "[" + interval[:-1] + " Weeks]"
+            elif interval[-1] == "o":
+                p = "[" + interval[:-2] + " Months]"
+            elif interval[-1] == "y":
+                p = "[" + interval[:-1] + " Years]"
         if p[1:3] == "1 ":
             p = p.replace("s", "")
     else:
-        if end == "":
+        if end_date == "":
             end_ = date.today()
             if end_.weekday() >= 5:
                 end_ = end_ + relativedelta(weekday=FR(-1))
-            end = end_.strftime("%Y-%m-%d")
-        p = "[From " + start + " to " + end + "]"
+            end_date = end_.strftime("%Y-%m-%d")
+        p = "[From " + start_date + " to " + end_date + "]"
 
     return p
 
@@ -156,7 +156,7 @@ def d_period(period: str, start: str, end: str):
 @log_start_end(log=logger)
 def portfolio_performance(
     weights: dict,
-    stock_returns: pd.DataFrame,
+    data: pd.DataFrame,
     freq: str = "D",
     risk_measure: str = "MV",
     risk_free_rate: float = 0,
@@ -172,7 +172,7 @@ def portfolio_performance(
     ----------
     weights: dict
         Portfolio weights
-    stock_returns: pd.DataFrame
+    data: pd.DataFrame
         Stock returns dataframe
     freq: str, optional
         The frequency used to calculate returns. Default value is 'D'. Possible
@@ -227,7 +227,7 @@ def portfolio_performance(
     """
     freq = freq.upper()
     weights = pd.Series(weights).to_frame()
-    returns = stock_returns @ weights
+    returns = data @ weights
     mu = returns.mean().item() * time_factor[freq]
     sigma = returns.std().item() * time_factor[freq] ** 0.5
     sharpe = (mu - risk_free_rate) / sigma
@@ -235,15 +235,15 @@ def portfolio_performance(
     factor_1 = str(int(time_factor[freq])) + ") "
     factor_2 = "√" + factor_1
 
-    print("Annual (by " + factor_1 + f"expected return: {100 * mu:.2f}%")
+    print("\nAnnual (by " + factor_1 + f"expected return: {100 * mu:.2f}%")
     print("Annual (by " + factor_2 + f"volatility: {100 * sigma:.2f}%")
     print(f"Sharpe ratio: {sharpe:.4f}")
 
     if risk_measure != "MV":
         risk = rp.Sharpe_Risk(
             weights,
-            cov=stock_returns.cov(),
-            returns=stock_returns,
+            cov=data.cov(),
+            returns=data,
             rm=risk_measure,
             rf=risk_free_rate,
             alpha=alpha,
@@ -302,35 +302,33 @@ def display_weights(weights: dict, market_neutral: bool = False):
     market_neutral : bool
         Flag indicating shorting allowed (negative weights)
     """
-    if not weights:
+
+    df = optimizer_helper.dict_to_df(weights)
+
+    if df.empty:
         return
-    weight_df = pd.DataFrame.from_dict(data=weights, orient="index", columns=["value"])
-    if not market_neutral:
-        if math.isclose(weight_df.sum()["value"], 1, rel_tol=0.1):
-            weight_df["value"] = (weight_df["value"] * 100).apply(
-                lambda s: f"{s:.2f}"
-            ) + " %"
-            weight_df["value"] = (
-                weight_df["value"]
-                .astype(str)
-                .apply(lambda s: " " * (8 - len(s)) + s if len(s) < 8 else "" + s)
-            )
-        else:
-            weight_df["value"] = (weight_df["value"] * 100).apply(
-                lambda s: f"{s:.0f}"
-            ) + " $"
-            weight_df["value"] = (
-                weight_df["value"]
-                .astype(str)
-                .apply(lambda s: " " * (16 - len(s)) + s if len(s) < 16 else "" + s)
-            )
 
-        print_rich_table(weight_df, headers=["Value"], show_index=True, title="Weights")
-
+    if math.isclose(df.sum()["value"], 1, rel_tol=0.1):
+        df["value"] = (df["value"] * 100).apply(lambda s: f"{s:.2f}") + " %"
+        df["value"] = (
+            df["value"]
+            .astype(str)
+            .apply(lambda s: " " * (8 - len(s)) + s if len(s) < 8 else "" + s)
+        )
     else:
-        tot_value = weight_df["value"].abs().mean()
+        df["value"] = (df["value"] * 100).apply(lambda s: f"{s:.0f}") + " $"
+        df["value"] = (
+            df["value"]
+            .astype(str)
+            .apply(lambda s: " " * (16 - len(s)) + s if len(s) < 16 else "" + s)
+        )
+
+    if market_neutral:
+        tot_value = df["value"].abs().mean()
         header = "Value ($)" if tot_value > 1.01 else "Value (%)"
-        print_rich_table(weight_df, headers=[header], show_index=True, title="Weights")
+        print_rich_table(df, headers=[header], show_index=True, title="Weights")
+    else:
+        print_rich_table(df, headers=["Value"], show_index=True, title="Weights")
 
 
 @log_start_end(log=logger)
@@ -342,8 +340,9 @@ def display_weights_sa(weights: dict, weights_sa: dict):
     ----------
     weights: dict
         weights to display.  Keys are stocks.  Values are either weights or values
-    market_neutral : bool
-        Flag indicating shorting allowed (negative weights)
+    weights_sa: dict
+        weights of sensitivity analysis to display.  Keys are stocks.
+        Values are either weights or values
     """
     if not weights or not weights_sa:
         return
@@ -395,7 +394,9 @@ def display_weights_sa(weights: dict, weights_sa: dict):
 
 
 @log_start_end(log=logger)
-def display_categories(weights: dict, categories: dict, column: str, title: str = ""):
+def display_categories(
+    weights: dict, categories: dict, column: str = "ASSET_CLASS", title: str = ""
+):
     """
     Prints categories in a nice format
 
@@ -405,58 +406,36 @@ def display_categories(weights: dict, categories: dict, column: str, title: str 
         weights to display.  Keys are stocks.  Values are either weights or values
     categories: dict
         categories to display. Keys are stocks.  Values are either weights or values
-    column: int.
+    column: str
         column selected to show table
         - ASSET_CLASS
         - SECTOR
         - INDUSTRY
         - COUNTRY
+    title: str
+        title to display
     """
-    if not weights:
+
+    if column == "CURRENT_INVESTED_AMOUNT":
+        console.print(f"[yellow]'{column}' cannot be displayed as a category.[/yellow]")
         return
-    weight_df = pd.DataFrame.from_dict(
-        data=weights, orient="index", columns=["value"], dtype=float
-    )
-    categories_df = pd.DataFrame.from_dict(data=categories, dtype=float)
 
-    col = list(categories_df.columns).index(column)
-    categories_df = weight_df.join(categories_df.iloc[:, [col, 4, 5]], how="inner")
-    categories_df.set_index(column, inplace=True)
-    categories_df.groupby(level=0).sum()
+    df = optimizer_model.get_categories(weights, categories, column)
 
-    table_df = pd.pivot_table(
-        categories_df,
-        values=["value", "CURRENT_INVESTED_AMOUNT"],
-        index=["CURRENCY", column],
-        aggfunc=np.sum,
-    )
-    table_df["CURRENT_WEIGHTS"] = (
-        table_df["CURRENT_INVESTED_AMOUNT"]
-        .groupby(level=0)
-        .transform(lambda x: x / sum(x))
-    )
-    table_df["value"] = (
-        table_df["value"].groupby(level=0).transform(lambda x: x / sum(x))
-    )
-    table_df = pd.concat(
-        [
-            d.append(d.sum().rename((k, "TOTAL " + k)))
-            for k, d in table_df.groupby(level=0)
-        ]
-    )
-    table_df = table_df.iloc[:, [0, 2, 1]]
+    if df.empty:
+        return
 
-    table_df["value"] = (table_df["value"] * 100).apply(lambda s: f"{s:.2f}") + " %"
-    table_df["value"] = (
-        table_df["value"]
+    df["value"] = (df["value"] * 100).apply(lambda s: f"{s:.2f}") + " %"
+    df["value"] = (
+        df["value"]
         .astype(str)
         .apply(lambda s: " " * (8 - len(s)) + s if len(s) < 8 else "" + s)
     )
-    table_df["CURRENT_WEIGHTS"] = (table_df["CURRENT_WEIGHTS"] * 100).apply(
+    df["CURRENT_WEIGHTS"] = (df["CURRENT_WEIGHTS"] * 100).apply(
         lambda s: f"{s:.2f}"
     ) + " %"
-    table_df["CURRENT_WEIGHTS"] = (
-        table_df["CURRENT_WEIGHTS"]
+    df["CURRENT_WEIGHTS"] = (
+        df["CURRENT_WEIGHTS"]
         .astype(str)
         .apply(
             lambda s: " " * (len("CURRENT_WEIGHTS") - len(s)) + s
@@ -464,11 +443,11 @@ def display_categories(weights: dict, categories: dict, column: str, title: str 
             else "" + s
         )
     )
-    table_df["CURRENT_INVESTED_AMOUNT"] = (
-        table_df["CURRENT_INVESTED_AMOUNT"].apply(lambda s: f"{s:,.0f}") + " $"
+    df["CURRENT_INVESTED_AMOUNT"] = (
+        df["CURRENT_INVESTED_AMOUNT"].apply(lambda s: f"{s:,.0f}") + " $"
     )
-    table_df["CURRENT_INVESTED_AMOUNT"] = (
-        table_df["CURRENT_INVESTED_AMOUNT"]
+    df["CURRENT_INVESTED_AMOUNT"] = (
+        df["CURRENT_INVESTED_AMOUNT"]
         .astype(str)
         .apply(
             lambda s: " " * (len("CURRENT_INVESTED_AMOUNT") - len(s)) + s
@@ -477,12 +456,13 @@ def display_categories(weights: dict, categories: dict, column: str, title: str 
         )
     )
 
-    table_df.reset_index(inplace=True)
-    table_df.set_index("CURRENCY", inplace=True)
+    df.reset_index(level=1, inplace=True)
+    headers = [s.title() for s in list(df.columns)]
+    show_index = True
+    if column == "CURRENCY":
+        show_index = False
 
-    headers = list(table_df.columns)
-    headers = [s.title() for s in headers]
-    print_rich_table(table_df, headers=headers, show_index=True, title=title)
+    print_rich_table(df, headers=headers, show_index=show_index, title=title)
 
 
 @log_start_end(log=logger)
@@ -615,10 +595,10 @@ def display_categories_sa(
 
 @log_start_end(log=logger)
 def display_equal_weight(
-    stocks: List[str],
-    period: str = "3y",
-    start: str = "",
-    end: str = "",
+    symbols: List[str],
+    interval: str = "3y",
+    start_date: str = "",
+    end_date: str = "",
     log_returns: bool = False,
     freq: str = "D",
     maxnan: float = 0.05,
@@ -631,18 +611,18 @@ def display_equal_weight(
     table: bool = False,
 ) -> Dict:
     """
-    Equally weighted portfolio, where weight = 1/# of stocks
+    Equally weighted portfolio, where weight = 1/# of symbols
 
     Parameters
     ----------
-    stocks : List[str]
+    symbols : List[str]
         List of portfolio tickers
-    period : str, optional
-        Period to look at returns from
-    start: str, optional
-        If not using period, start date string (YYYY-MM-DD)
-    end: str, optional
-        If not using period, end date string (YYYY-MM-DD). If empty use last
+    interval : str, optional
+        interval to look at returns from
+    start_date: str, optional
+        If not using interval, start date string (YYYY-MM-DD)
+    end_date: str, optional
+        If not using interval, end date string (YYYY-MM-DD). If empty use last
         weekday.
     log_returns: bool, optional
         If True calculate log returns, else arithmetic returns. Default value
@@ -660,8 +640,7 @@ def display_equal_weight(
     threshold: float, optional
         Value used to replace outliers that are higher to threshold.
     method: str
-        Method used to fill nan values. Default value is 'time'. For more information see
-        `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`_.
+        Method used to fill nan values. Default value is 'time'. For more information see `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`__.
     risk_measure: str, optional
         The risk measure used to optimize the portfolio.
         The default is 'MV'. Possible values are:
@@ -681,7 +660,7 @@ def display_equal_weight(
         - 'MDD': Maximum Drawdown of uncompounded cumulative returns.
 
     risk_free_rate: float, optional
-        Risk free rate, must be in the same period of assets returns. Used for
+        Risk free rate, must be in the same interval of assets returns. Used for
         'FLPM' and 'SLPM' and Sharpe objective function. The default is 0.
     alpha: float, optional
         Significance level of CVaR, EVaR, CDaR and EDaR.
@@ -690,14 +669,14 @@ def display_equal_weight(
     table: bool, optional
         True if plot table weights, by default False
     """
-    p = d_period(period, start, end)
+    p = d_period(interval, start_date, end_date)
     s_title = f"{p} Equally Weighted Portfolio\n"
 
     weights, stock_returns = optimizer_model.get_equal_weights(
-        stocks=stocks,
-        period=period,
-        start=start,
-        end=end,
+        symbols=symbols,
+        interval=interval,
+        start_date=start_date,
+        end_date=end_date,
         log_returns=log_returns,
         freq=freq,
         maxnan=maxnan,
@@ -707,11 +686,11 @@ def display_equal_weight(
     )
 
     if table:
-        console.print("\n", s_title)
+        console.print(s_title)
         display_weights(weights)
         portfolio_performance(
             weights=weights,
-            stock_returns=stock_returns,
+            data=stock_returns,
             risk_measure=risk_choices[risk_measure],
             risk_free_rate=risk_free_rate,
             alpha=alpha,
@@ -720,42 +699,41 @@ def display_equal_weight(
             # b_sim=beta_sim,
             freq=freq,
         )
-        console.print("")
 
     return weights
 
 
 @log_start_end(log=logger)
 def display_property_weighting(
-    stocks: List[str],
-    period: str = "3y",
-    start: str = "",
-    end: str = "",
+    symbols: List[str],
+    interval: str = "3y",
+    start_date: str = "",
+    end_date: str = "",
     log_returns: bool = False,
     freq: str = "D",
     maxnan: float = 0.05,
     threshold: float = 0,
     method: str = "time",
     s_property: str = "marketCap",
-    risk_measure="mv",
+    risk_measure: str = "mv",
     risk_free_rate: float = 0,
-    alpha=0.05,
+    alpha: float = 0.05,
     value: float = 1,
     table: bool = False,
-) -> Dict:
+) -> Dict[str, float]:
     """
     Builds a portfolio weighted by selected property
 
     Parameters
     ----------
-    stocks : List[str]
+    symbols : List[str]
         List of portfolio tickers
-    period : str, optional
-        Period to look at returns from
-    start: str, optional
-        If not using period, start date string (YYYY-MM-DD)
-    end: str, optional
-        If not using period, end date string (YYYY-MM-DD). If empty use last
+    interval : str, optional
+        interval to look at returns from
+    start_date: str, optional
+        If not using interval, start date string (YYYY-MM-DD)
+    end_date: str, optional
+        If not using interval, end date string (YYYY-MM-DD). If empty use last
         weekday.
     log_returns: bool, optional
         If True calculate log returns, else arithmetic returns. Default value
@@ -763,9 +741,9 @@ def display_property_weighting(
     freq: str, optional
         The frequency used to calculate returns. Default value is 'D'. Possible
         values are:
-            - 'D' for daily returns.
-            - 'W' for weekly returns.
-            - 'M' for monthly returns.
+        - 'D' for daily returns.
+        - 'W' for weekly returns.
+        - 'M' for monthly returns.
 
     maxnan: float, optional
         Max percentage of nan values accepted per asset to be included in
@@ -773,8 +751,7 @@ def display_property_weighting(
     threshold: float, optional
         Value used to replace outliers that are higher to threshold.
     method: str
-        Method used to fill nan values. Default value is 'time'. For more information see
-        `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`_.
+        Method used to fill nan values. Default value is 'time'. For more information see `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`__.
     s_property : str
         Property to get weighted portfolio of
     risk_measure: str, optional
@@ -796,7 +773,7 @@ def display_property_weighting(
         - 'MDD': Maximum Drawdown of uncompounded cumulative returns.
 
     risk_free_rate: float, optional
-        Risk free rate, must be in the same period of assets returns. Used for
+        Risk free rate, must be in the same interval of assets returns. Used for
         'FLPM' and 'SLPM' and Sharpe objective function. The default is 0.
     alpha: float, optional
         Significance level of CVaR, EVaR, CDaR and EDaR.
@@ -805,14 +782,14 @@ def display_property_weighting(
     table: bool, optional
         True if plot table weights, by default False
     """
-    p = d_period(period, start, end)
+    p = d_period(interval, start_date, end_date)
     s_title = f"{p} Weighted Portfolio based on " + s_property + "\n"
 
     weights, stock_returns = optimizer_model.get_property_weights(
-        stocks=stocks,
-        period=period,
-        start=start,
-        end=end,
+        symbols=symbols,
+        interval=interval,
+        start_date=start_date,
+        end_date=end_date,
         log_returns=log_returns,
         freq=freq,
         maxnan=maxnan,
@@ -823,11 +800,11 @@ def display_property_weighting(
     )
 
     if table:
-        console.print("\n", s_title)
+        console.print(s_title)
         display_weights(weights)
         portfolio_performance(
             weights=weights,
-            stock_returns=stock_returns,
+            data=stock_returns,
             risk_measure=risk_choices[risk_measure],
             risk_free_rate=risk_free_rate,
             alpha=alpha,
@@ -836,17 +813,16 @@ def display_property_weighting(
             # b_sim=beta_sim,
             freq=freq,
         )
-        console.print("")
 
     return weights
 
 
 @log_start_end(log=logger)
 def display_mean_risk(
-    stocks: List[str],
-    period: str = "3y",
-    start: str = "",
-    end: str = "",
+    symbols: List[str],
+    interval: str = "3y",
+    start_date: str = "",
+    end_date: str = "",
     log_returns: bool = False,
     freq: str = "D",
     maxnan: float = 0.05,
@@ -871,14 +847,14 @@ def display_mean_risk(
 
     Parameters
     ----------
-    stocks : List[str]
+    symbols : List[str]
         List of portfolio tickers
-    period : str, optional
-        Period to look at returns from
-    start: str, optional
-        If not using period, start date string (YYYY-MM-DD)
-    end: str, optional
-        If not using period, end date string (YYYY-MM-DD). If empty use last
+    interval : str, optional
+        interval to look at returns from
+    start_date: str, optional
+        If not using interval, start date string (YYYY-MM-DD)
+    end_date: str, optional
+        If not using interval, end date string (YYYY-MM-DD). If empty use last
         weekday.
     log_returns: bool, optional
         If True calculate log returns, else arithmetic returns. Default value
@@ -886,9 +862,9 @@ def display_mean_risk(
     freq: str, optional
         The frequency used to calculate returns. Default value is 'D'. Possible
         values are:
-            - 'D' for daily returns.
-            - 'W' for weekly returns.
-            - 'M' for monthly returns.
+        - 'D' for daily returns.
+        - 'W' for weekly returns.
+        - 'M' for monthly returns.
 
     maxnan: float, optional
         Max percentage of nan values accepted per asset to be included in
@@ -896,8 +872,7 @@ def display_mean_risk(
     threshold: float, optional
         Value used to replace outliers that are higher to threshold.
     method: str
-        Method used to fill nan values. Default value is 'time'. For more information see
-        `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`_.
+        Method used to fill nan values. Default value is 'time'. For more information see `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`__.
     risk_measure: str, optional
         The risk measure used to optimize the portfolio.
         The default is 'MV'. Possible values are:
@@ -926,7 +901,7 @@ def display_mean_risk(
         - 'MaxRet': Maximize the expected return of the portfolio.
 
     risk_free_rate: float, optional
-        Risk free rate, must be in the same period of assets returns. Used for
+        Risk free rate, must be in the same interval of assets returns. Used for
         'FLPM' and 'SLPM' and Sharpe objective function. The default is 0.
     risk_aversion: float, optional
         Risk aversion factor of the 'Utility' objective function.
@@ -942,28 +917,24 @@ def display_mean_risk(
         The default value is 'hist'. Possible values are:
 
         - 'hist': use historical estimates.
-        - 'ewma1': use ewma with adjust=True. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
-        - 'ewma2': use ewma with adjust=False. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
+        - 'ewma1': use ewma with adjust=True. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
+        - 'ewma2': use ewma with adjust=False. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
 
     covariance: str, optional
         The method used to estimate the covariance matrix:
         The default is 'hist'. Possible values are:
 
         - 'hist': use historical estimates.
-        - 'ewma1': use ewma with adjust=True. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
-        - 'ewma2': use ewma with adjust=False. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
+        - 'ewma1': use ewma with adjust=True. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
+        - 'ewma2': use ewma with adjust=False. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
         - 'ledoit': use the Ledoit and Wolf Shrinkage method.
         - 'oas': use the Oracle Approximation Shrinkage method.
         - 'shrunk': use the basic Shrunk Covariance method.
         - 'gl': use the basic Graphical Lasso Covariance method.
-        - 'jlogo': use the j-LoGo Covariance method. For more information see: :cite:`a-jLogo`.
-        - 'fixed': denoise using fixed method. For more information see chapter 2 of :cite:`a-MLforAM`.
-        - 'spectral': denoise using spectral method. For more information see chapter 2 of :cite:`a-MLforAM`.
-        - 'shrink': denoise using shrink method. For more information see chapter 2 of :cite:`a-MLforAM`.
+        - 'jlogo': use the j-LoGo Covariance method. For more information see: `a-jLogo`.
+        - 'fixed': denoise using fixed method. For more information see chapter 2 of `a-MLforAM`.
+        - 'spectral': denoise using spectral method. For more information see chapter 2 of `a-MLforAM`.
+        - 'shrink': denoise using shrink method. For more information see chapter 2 of `a-MLforAM`.
 
     d_ewma: float, optional
         The smoothing factor of ewma methods.
@@ -975,7 +946,7 @@ def display_mean_risk(
     table: bool, optional
         True if plot table weights, by default False
     """
-    p = d_period(period, start, end)
+    p = d_period(interval, start_date, end_date)
     if objective == "sharpe":
         s_title = f"{p} Maximal return/risk ratio portfolio using "
     elif objective == "minrisk":
@@ -987,10 +958,10 @@ def display_mean_risk(
     s_title += risk_names[risk_measure] + " as risk measure\n"
 
     weights, stock_returns = optimizer_model.get_mean_risk_portfolio(
-        stocks=stocks,
-        period=period,
-        start=start,
-        end=end,
+        symbols=symbols,
+        interval=interval,
+        start_date=start_date,
+        end_date=end_date,
         log_returns=log_returns,
         freq=freq,
         maxnan=maxnan,
@@ -1015,11 +986,11 @@ def display_mean_risk(
         return {}
 
     if table:
-        console.print("\n", s_title)
+        console.print(s_title)
         display_weights(weights)
         portfolio_performance(
             weights=weights,
-            stock_returns=stock_returns,
+            data=stock_returns,
             risk_measure=risk_choices[risk_measure],
             risk_free_rate=risk_free_rate,
             alpha=alpha,
@@ -1028,17 +999,16 @@ def display_mean_risk(
             # b_sim=beta_sim,
             freq=freq,
         )
-        console.print("")
 
     return weights
 
 
 @log_start_end(log=logger)
 def display_max_sharpe(
-    stocks: List[str],
-    period: str = "3y",
-    start: str = "",
-    end: str = "",
+    symbols: List[str],
+    interval: str = "3y",
+    start_date: str = "",
+    end_date: str = "",
     log_returns: bool = False,
     freq: str = "D",
     maxnan: float = 0.05,
@@ -1046,6 +1016,7 @@ def display_max_sharpe(
     method: str = "time",
     risk_measure: str = "MV",
     risk_free_rate: float = 0,
+    risk_aversion: float = 1,
     alpha: float = 0.05,
     target_return: float = -1,
     target_risk: float = -1,
@@ -1061,14 +1032,14 @@ def display_max_sharpe(
 
     Parameters
     ----------
-    stocks : List[str]
+    symbols : List[str]
         List of portfolio tickers
-    period : str, optional
-        Period to look at returns from
-    start: str, optional
-        If not using period, start date string (YYYY-MM-DD)
-    end: str, optional
-        If not using period, end date string (YYYY-MM-DD). If empty use last
+    interval : str, optional
+        interval to look at returns from
+    start_date: str, optional
+        If not using interval, start date string (YYYY-MM-DD)
+    end_date: str, optional
+        If not using interval, end date string (YYYY-MM-DD). If empty use last
         weekday.
     log_returns: bool, optional
         If True calculate log returns, else arithmetic returns. Default value
@@ -1076,9 +1047,9 @@ def display_max_sharpe(
     freq: str, optional
         The frequency used to calculate returns. Default value is 'D'. Possible
         values are:
-            - 'D' for daily returns.
-            - 'W' for weekly returns.
-            - 'M' for monthly returns.
+        - 'D' for daily returns.
+        - 'W' for weekly returns.
+        - 'M' for monthly returns.
 
     maxnan: float, optional
         Max percentage of nan values accepted per asset to be included in
@@ -1086,8 +1057,7 @@ def display_max_sharpe(
     threshold: float, optional
         Value used to replace outliers that are higher to threshold.
     method: str
-        Method used to fill nan values. Default value is 'time'. For more information see
-        `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`_.
+        Method used to fill nan values. Default value is 'time'. For more information see `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`__.
     risk_measure: str, optional
         The risk measure used to optimize the portfolio.
         The default is 'MV'. Possible values are:
@@ -1107,8 +1077,11 @@ def display_max_sharpe(
         - 'MDD': Maximum Drawdown of uncompounded cumulative returns.
 
     risk_free_rate: float, optional
-        Risk free rate, must be in the same period of assets returns. Used for
+        Risk free rate, must be in the same interval of assets returns. Used for
         'FLPM' and 'SLPM' and Sharpe objective function. The default is 0.
+    risk_aversion: float, optional
+        Risk aversion factor of the 'Utility' objective function.
+        The default is 1.
     alpha: float, optional
         Significance level of CVaR, EVaR, CDaR and EDaR
     target_return: float, optional
@@ -1120,28 +1093,24 @@ def display_max_sharpe(
         The default value is 'hist'. Possible values are:
 
         - 'hist': use historical estimates.
-        - 'ewma1': use ewma with adjust=True. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
-        - 'ewma2': use ewma with adjust=False. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
+        - 'ewma1': use ewma with adjust=True. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
+        - 'ewma2': use ewma with adjust=False. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
 
     covariance: str, optional
         The method used to estimate the covariance matrix:
         The default is 'hist'. Possible values are:
 
         - 'hist': use historical estimates.
-        - 'ewma1': use ewma with adjust=True. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
-        - 'ewma2': use ewma with adjust=False. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
+        - 'ewma1': use ewma with adjust=True. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
+        - 'ewma2': use ewma with adjust=False. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
         - 'ledoit': use the Ledoit and Wolf Shrinkage method.
         - 'oas': use the Oracle Approximation Shrinkage method.
         - 'shrunk': use the basic Shrunk Covariance method.
         - 'gl': use the basic Graphical Lasso Covariance method.
-        - 'jlogo': use the j-LoGo Covariance method. For more information see: :cite:`a-jLogo`.
-        - 'fixed': denoise using fixed method. For more information see chapter 2 of :cite:`a-MLforAM`.
-        - 'spectral': denoise using spectral method. For more information see chapter 2 of :cite:`a-MLforAM`.
-        - 'shrink': denoise using shrink method. For more information see chapter 2 of :cite:`a-MLforAM`.
+        - 'jlogo': use the j-LoGo Covariance method. For more information see: `a-jLogo`.
+        - 'fixed': denoise using fixed method. For more information see chapter 2 of `a-MLforAM`.
+        - 'spectral': denoise using spectral method. For more information see chapter 2 of `a-MLforAM`.
+        - 'shrink': denoise using shrink method. For more information see chapter 2 of `a-MLforAM`.
 
     d_ewma: float, optional
         The smoothing factor of ewma methods.
@@ -1153,19 +1122,24 @@ def display_max_sharpe(
     table: bool, optional
         True if plot table weights, by default False
     """
-    weights = display_mean_risk(
-        stocks=stocks,
-        period=period,
-        start=start,
-        end=end,
+
+    p = d_period(interval, start_date, end_date)
+    s_title = f"{p} Maximal return/risk ratio portfolio using "
+    s_title += risk_names[risk_measure.lower()] + " as risk measure\n"
+
+    weights, stock_returns = optimizer_model.get_max_sharpe(
+        symbols=symbols,
+        interval=interval,
+        start_date=start_date,
+        end_date=end_date,
         log_returns=log_returns,
         freq=freq,
         maxnan=maxnan,
         threshold=threshold,
         method=method,
         risk_measure=risk_measure,
-        objective="sharpe",
         risk_free_rate=risk_free_rate,
+        risk_aversion=risk_aversion,
         alpha=alpha,
         target_return=target_return,
         target_risk=target_risk,
@@ -1174,17 +1148,39 @@ def display_max_sharpe(
         d_ewma=d_ewma,
         value=value,
         value_short=value_short,
-        table=table,
     )
+
+    if stock_returns is None or stock_returns.empty:
+        return {}
+
+    if weights is None:
+        console.print("\n", "There is no solution with these parameters")
+        return {}
+
+    if table:
+        console.print(s_title)
+        display_weights(weights)
+        portfolio_performance(
+            weights=weights,
+            data=stock_returns,
+            risk_measure=risk_choices[risk_measure],
+            risk_free_rate=risk_free_rate,
+            alpha=alpha,
+            # a_sim=a_sim,
+            # beta=beta,
+            # b_sim=beta_sim,
+            freq=freq,
+        )
+
     return weights
 
 
 @log_start_end(log=logger)
 def display_min_risk(
-    stocks: List[str],
-    period: str = "3y",
-    start: str = "",
-    end: str = "",
+    symbols: List[str],
+    interval: str = "3y",
+    start_date: str = "",
+    end_date: str = "",
     log_returns: bool = False,
     freq: str = "D",
     maxnan: float = 0.05,
@@ -1192,6 +1188,7 @@ def display_min_risk(
     method: str = "time",
     risk_measure: str = "MV",
     risk_free_rate: float = 0,
+    risk_aversion: float = 1,
     alpha: float = 0.05,
     target_return: float = -1,
     target_risk: float = -1,
@@ -1207,14 +1204,14 @@ def display_min_risk(
 
     Parameters
     ----------
-    stocks : List[str]
+    symbols : List[str]
         List of portfolio tickers
-    period : str, optional
-        Period to look at returns from
-    start: str, optional
-        If not using period, start date string (YYYY-MM-DD)
-    end: str, optional
-        If not using period, end date string (YYYY-MM-DD). If empty use last
+    interval : str, optional
+        interval to look at returns from
+    start_date: str, optional
+        If not using interval, start date string (YYYY-MM-DD)
+    end_date: str, optional
+        If not using interval, end date string (YYYY-MM-DD). If empty use last
         weekday.
     log_returns: bool, optional
         If True calculate log returns, else arithmetic returns. Default value
@@ -1222,9 +1219,9 @@ def display_min_risk(
     freq: str, optional
         The frequency used to calculate returns. Default value is 'D'. Possible
         values are:
-            - 'D' for daily returns.
-            - 'W' for weekly returns.
-            - 'M' for monthly returns.
+        - 'D' for daily returns.
+        - 'W' for weekly returns.
+        - 'M' for monthly returns.
 
     maxnan: float, optional
         Max percentage of nan values accepted per asset to be included in
@@ -1232,8 +1229,7 @@ def display_min_risk(
     threshold: float, optional
         Value used to replace outliers that are higher to threshold.
     method: str
-        Method used to fill nan values. Default value is 'time'. For more information see
-        `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`_.
+        Method used to fill nan values. Default value is 'time'. For more information see `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`__.
     risk_measure: str, optional
         The risk measure used to optimize the portfolio.
         The default is 'MV'. Possible values are:
@@ -1253,8 +1249,11 @@ def display_min_risk(
         - 'MDD': Maximum Drawdown of uncompounded cumulative returns.
 
     risk_free_rate: float, optional
-        Risk free rate, must be in the same period of assets returns. Used for
+        Risk free rate, must be in the same interval of assets returns. Used for
         'FLPM' and 'SLPM' and Sharpe objective function. The default is 0.
+    risk_aversion: float, optional
+        Risk aversion factor of the 'Utility' objective function.
+        The default is 1.
     alpha: float, optional
         Significance level of CVaR, EVaR, CDaR and EDaR
     target_return: float, optional
@@ -1266,28 +1265,24 @@ def display_min_risk(
         The default value is 'hist'. Possible values are:
 
         - 'hist': use historical estimates.
-        - 'ewma1': use ewma with adjust=True. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
-        - 'ewma2': use ewma with adjust=False. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
+        - 'ewma1': use ewma with adjust=True. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
+        - 'ewma2': use ewma with adjust=False. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
 
     covariance: str, optional
         The method used to estimate the covariance matrix:
         The default is 'hist'. Possible values are:
 
         - 'hist': use historical estimates.
-        - 'ewma1': use ewma with adjust=True. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
-        - 'ewma2': use ewma with adjust=False. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
+        - 'ewma1': use ewma with adjust=True. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
+        - 'ewma2': use ewma with adjust=False. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
         - 'ledoit': use the Ledoit and Wolf Shrinkage method.
         - 'oas': use the Oracle Approximation Shrinkage method.
         - 'shrunk': use the basic Shrunk Covariance method.
         - 'gl': use the basic Graphical Lasso Covariance method.
-        - 'jlogo': use the j-LoGo Covariance method. For more information see: :cite:`a-jLogo`.
-        - 'fixed': denoise using fixed method. For more information see chapter 2 of :cite:`a-MLforAM`.
-        - 'spectral': denoise using spectral method. For more information see chapter 2 of :cite:`a-MLforAM`.
-        - 'shrink': denoise using shrink method. For more information see chapter 2 of :cite:`a-MLforAM`.
+        - 'jlogo': use the j-LoGo Covariance method. For more information see: `a-jLogo`.
+        - 'fixed': denoise using fixed method. For more information see chapter 2 of `a-MLforAM`.
+        - 'spectral': denoise using spectral method. For more information see chapter 2 of `a-MLforAM`.
+        - 'shrink': denoise using shrink method. For more information see chapter 2 of `a-MLforAM`.
 
     d_ewma: float, optional
         The smoothing factor of ewma methods.
@@ -1299,19 +1294,23 @@ def display_min_risk(
     table: bool, optional
         True if plot table weights, by default False
     """
-    weights = display_mean_risk(
-        stocks=stocks,
-        period=period,
-        start=start,
-        end=end,
+    p = d_period(interval, start_date, end_date)
+    s_title = f"{p} Minimum risk portfolio using "
+    s_title += risk_names[risk_measure.lower()] + " as risk measure\n"
+
+    weights, stock_returns = optimizer_model.get_min_risk(
+        symbols=symbols,
+        interval=interval,
+        start_date=start_date,
+        end_date=end_date,
         log_returns=log_returns,
         freq=freq,
         maxnan=maxnan,
         threshold=threshold,
         method=method,
         risk_measure=risk_measure,
-        objective="minrisk",
         risk_free_rate=risk_free_rate,
+        risk_aversion=risk_aversion,
         alpha=alpha,
         target_return=target_return,
         target_risk=target_risk,
@@ -1320,17 +1319,36 @@ def display_min_risk(
         d_ewma=d_ewma,
         value=value,
         value_short=value_short,
-        table=table,
     )
+
+    if weights is None:
+        console.print("\n", "There is no solution with these parameters")
+        return {}
+
+    if table:
+        console.print(s_title)
+        display_weights(weights)
+        portfolio_performance(
+            weights=weights,
+            data=stock_returns,
+            risk_measure=risk_choices[risk_measure],
+            risk_free_rate=risk_free_rate,
+            alpha=alpha,
+            # a_sim=a_sim,
+            # beta=beta,
+            # b_sim=beta_sim,
+            freq=freq,
+        )
+
     return weights
 
 
 @log_start_end(log=logger)
 def display_max_util(
-    stocks: List[str],
-    period: str = "3y",
-    start: str = "",
-    end: str = "",
+    symbols: List[str],
+    interval: str = "3y",
+    start_date: str = "",
+    end_date: str = "",
     log_returns: bool = False,
     freq: str = "D",
     maxnan: float = 0.05,
@@ -1354,14 +1372,14 @@ def display_max_util(
 
     Parameters
     ----------
-    stocks : List[str]
+    symbols : List[str]
         List of portfolio tickers
-    period : str, optional
-        Period to look at returns from
-    start: str, optional
-        If not using period, start date string (YYYY-MM-DD)
-    end: str, optional
-        If not using period, end date string (YYYY-MM-DD). If empty use last
+    interval : str, optional
+        interval to look at returns from
+    start_date: str, optional
+        If not using interval, start date string (YYYY-MM-DD)
+    end_date: str, optional
+        If not using interval, end date string (YYYY-MM-DD). If empty use last
         weekday.
     log_returns: bool, optional
         If True calculate log returns, else arithmetic returns. Default value
@@ -1369,9 +1387,9 @@ def display_max_util(
     freq: str, optional
         The frequency used to calculate returns. Default value is 'D'. Possible
         values are:
-            - 'D' for daily returns.
-            - 'W' for weekly returns.
-            - 'M' for monthly returns.
+        - 'D' for daily returns.
+        - 'W' for weekly returns.
+        - 'M' for monthly returns.
 
     maxnan: float, optional
         Max percentage of nan values accepted per asset to be included in
@@ -1379,8 +1397,7 @@ def display_max_util(
     threshold: float, optional
         Value used to replace outliers that are higher to threshold.
     method: str
-        Method used to fill nan values. Default value is 'time'. For more information see
-        `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`_.
+        Method used to fill nan values. Default value is 'time'. For more information see `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`__.
     risk_measure: str, optional
         The risk measure used to optimize the portfolio.
         The default is 'MV'. Possible values are:
@@ -1400,7 +1417,7 @@ def display_max_util(
         - 'MDD': Maximum Drawdown of uncompounded cumulative returns.
 
     risk_free_rate: float, optional
-        Risk free rate, must be in the same period of assets returns. Used for
+        Risk free rate, must be in the same interval of assets returns. Used for
         'FLPM' and 'SLPM' and Sharpe objective function. The default is 0.
     risk_aversion: float, optional
         Risk aversion factor of the 'Utility' objective function.
@@ -1416,28 +1433,24 @@ def display_max_util(
         The default value is 'hist'. Possible values are:
 
         - 'hist': use historical estimates.
-        - 'ewma1': use ewma with adjust=True. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
-        - 'ewma2': use ewma with adjust=False. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
+        - 'ewma1': use ewma with adjust=True. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
+        - 'ewma2': use ewma with adjust=False. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
 
     covariance: str, optional
         The method used to estimate the covariance matrix:
         The default is 'hist'. Possible values are:
 
         - 'hist': use historical estimates.
-        - 'ewma1': use ewma with adjust=True. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
-        - 'ewma2': use ewma with adjust=False. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
+        - 'ewma1': use ewma with adjust=True. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
+        - 'ewma2': use ewma with adjust=False. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
         - 'ledoit': use the Ledoit and Wolf Shrinkage method.
         - 'oas': use the Oracle Approximation Shrinkage method.
         - 'shrunk': use the basic Shrunk Covariance method.
         - 'gl': use the basic Graphical Lasso Covariance method.
-        - 'jlogo': use the j-LoGo Covariance method. For more information see: :cite:`a-jLogo`.
-        - 'fixed': denoise using fixed method. For more information see chapter 2 of :cite:`a-MLforAM`.
-        - 'spectral': denoise using spectral method. For more information see chapter 2 of :cite:`a-MLforAM`.
-        - 'shrink': denoise using shrink method. For more information see chapter 2 of :cite:`a-MLforAM`.
+        - 'jlogo': use the j-LoGo Covariance method. For more information see: `a-jLogo`.
+        - 'fixed': denoise using fixed method. For more information see chapter 2 of `a-MLforAM`.
+        - 'spectral': denoise using spectral method. For more information see chapter 2 of `a-MLforAM`.
+        - 'shrink': denoise using shrink method. For more information see chapter 2 of `a-MLforAM`.
 
     d_ewma: float, optional
         The smoothing factor of ewma methods.
@@ -1449,18 +1462,21 @@ def display_max_util(
     table: bool, optional
         True if plot table weights, by default False
     """
-    weights = display_mean_risk(
-        stocks=stocks,
-        period=period,
-        start=start,
-        end=end,
+    p = d_period(interval, start_date, end_date)
+    s_title = f"{p} Maximal risk averse utility function portfolio using "
+    s_title += risk_names[risk_measure.lower()] + " as risk measure\n"
+
+    weights, stock_returns = optimizer_model.get_max_util(
+        symbols=symbols,
+        interval=interval,
+        start_date=start_date,
+        end_date=end_date,
         log_returns=log_returns,
         freq=freq,
         maxnan=maxnan,
         threshold=threshold,
         method=method,
         risk_measure=risk_measure,
-        objective="utility",
         risk_free_rate=risk_free_rate,
         risk_aversion=risk_aversion,
         alpha=alpha,
@@ -1471,17 +1487,36 @@ def display_max_util(
         d_ewma=d_ewma,
         value=value,
         value_short=value_short,
-        table=table,
     )
+
+    if weights is None:
+        console.print("\n", "There is no solution with these parameters")
+        return {}
+
+    if table:
+        console.print(s_title)
+        display_weights(weights)
+        portfolio_performance(
+            weights=weights,
+            data=stock_returns,
+            risk_measure=risk_choices[risk_measure],
+            risk_free_rate=risk_free_rate,
+            alpha=alpha,
+            # a_sim=a_sim,
+            # beta=beta,
+            # b_sim=beta_sim,
+            freq=freq,
+        )
+
     return weights
 
 
 @log_start_end(log=logger)
 def display_max_ret(
-    stocks: List[str],
-    period: str = "3y",
-    start: str = "",
-    end: str = "",
+    symbols: List[str],
+    interval: str = "3y",
+    start_date: str = "",
+    end_date: str = "",
     log_returns: bool = False,
     freq: str = "D",
     maxnan: float = 0.05,
@@ -1489,6 +1524,7 @@ def display_max_ret(
     method: str = "time",
     risk_measure: str = "MV",
     risk_free_rate: float = 0,
+    risk_aversion: float = 1,
     alpha: float = 0.05,
     target_return: float = -1,
     target_risk: float = -1,
@@ -1504,14 +1540,14 @@ def display_max_ret(
 
     Parameters
     ----------
-    stocks : List[str]
+    symbols : List[str]
         List of portfolio tickers
-    period : str, optional
-        Period to look at returns from
-    start: str, optional
-        If not using period, start date string (YYYY-MM-DD)
-    end: str, optional
-        If not using period, end date string (YYYY-MM-DD). If empty use last
+    interval : str, optional
+        interval to look at returns from
+    start_date: str, optional
+        If not using interval, start date string (YYYY-MM-DD)
+    end_date: str, optional
+        If not using interval, end date string (YYYY-MM-DD). If empty use last
         weekday.
     log_returns: bool, optional
         If True calculate log returns, else arithmetic returns. Default value
@@ -1519,9 +1555,9 @@ def display_max_ret(
     freq: str, optional
         The frequency used to calculate returns. Default value is 'D'. Possible
         values are:
-            - 'D' for daily returns.
-            - 'W' for weekly returns.
-            - 'M' for monthly returns.
+        - 'D' for daily returns.
+        - 'W' for weekly returns.
+        - 'M' for monthly returns.
 
     maxnan: float, optional
         Max percentage of nan values accepted per asset to be included in
@@ -1529,8 +1565,7 @@ def display_max_ret(
     threshold: float, optional
         Value used to replace outliers that are higher to threshold.
     method: str
-        Method used to fill nan values. Default value is 'time'. For more information see
-        `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`_.
+        Method used to fill nan values. Default value is 'time'. For more information see `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`__.
     risk_measure: str, optional
         The risk measure used to optimize the portfolio.
         The default is 'MV'. Possible values are:
@@ -1550,8 +1585,11 @@ def display_max_ret(
         - 'MDD': Maximum Drawdown of uncompounded cumulative returns.
 
     risk_free_rate: float, optional
-        Risk free rate, must be in the same period of assets returns. Used for
+        Risk free rate, must be in the same interval of assets returns. Used for
         'FLPM' and 'SLPM' and Sharpe objective function. The default is 0.
+    risk_aversion: float, optional
+        Risk aversion factor of the 'Utility' objective function.
+        The default is 1.
     alpha: float, optional
         Significance level of CVaR, EVaR, CDaR and EDaR
     target_return: float, optional
@@ -1563,28 +1601,24 @@ def display_max_ret(
         The default value is 'hist'. Possible values are:
 
         - 'hist': use historical estimates.
-        - 'ewma1': use ewma with adjust=True. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
-        - 'ewma2': use ewma with adjust=False. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
+        - 'ewma1': use ewma with adjust=True. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
+        - 'ewma2': use ewma with adjust=False. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
 
     covariance: str, optional
         The method used to estimate the covariance matrix:
         The default is 'hist'. Possible values are:
 
         - 'hist': use historical estimates.
-        - 'ewma1': use ewma with adjust=True. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
-        - 'ewma2': use ewma with adjust=False. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
+        - 'ewma1': use ewma with adjust=True. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
+        - 'ewma2': use ewma with adjust=False. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
         - 'ledoit': use the Ledoit and Wolf Shrinkage method.
         - 'oas': use the Oracle Approximation Shrinkage method.
         - 'shrunk': use the basic Shrunk Covariance method.
         - 'gl': use the basic Graphical Lasso Covariance method.
-        - 'jlogo': use the j-LoGo Covariance method. For more information see: :cite:`a-jLogo`.
-        - 'fixed': denoise using fixed method. For more information see chapter 2 of :cite:`a-MLforAM`.
-        - 'spectral': denoise using spectral method. For more information see chapter 2 of :cite:`a-MLforAM`.
-        - 'shrink': denoise using shrink method. For more information see chapter 2 of :cite:`a-MLforAM`.
+        - 'jlogo': use the j-LoGo Covariance method. For more information see: `a-jLogo`.
+        - 'fixed': denoise using fixed method. For more information see chapter 2 of `a-MLforAM`.
+        - 'spectral': denoise using spectral method. For more information see chapter 2 of `a-MLforAM`.
+        - 'shrink': denoise using shrink method. For more information see chapter 2 of `a-MLforAM`.
 
     d_ewma: float, optional
         The smoothing factor of ewma methods.
@@ -1596,19 +1630,23 @@ def display_max_ret(
     table: bool, optional
         True if plot table weights, by default False
     """
-    weights = display_mean_risk(
-        stocks=stocks,
-        period=period,
-        start=start,
-        end=end,
+    p = d_period(interval, start_date, end_date)
+    s_title = f"{p} Maximal risk averse utility function portfolio using "
+    s_title += risk_names[risk_measure.lower()] + " as risk measure\n"
+
+    weights, stock_returns = optimizer_model.get_max_ret(
+        symbols=symbols,
+        interval=interval,
+        start_date=start_date,
+        end_date=end_date,
         log_returns=log_returns,
         freq=freq,
         maxnan=maxnan,
         threshold=threshold,
         method=method,
         risk_measure=risk_measure,
-        objective="maxret",
         risk_free_rate=risk_free_rate,
+        risk_aversion=risk_aversion,
         alpha=alpha,
         target_return=target_return,
         target_risk=target_risk,
@@ -1617,17 +1655,36 @@ def display_max_ret(
         d_ewma=d_ewma,
         value=value,
         value_short=value_short,
-        table=table,
     )
+
+    if weights is None:
+        console.print("\n", "There is no solution with these parameters")
+        return {}
+
+    if table:
+        console.print(s_title)
+        display_weights(weights)
+        portfolio_performance(
+            weights=weights,
+            data=stock_returns,
+            risk_measure=risk_choices[risk_measure],
+            risk_free_rate=risk_free_rate,
+            alpha=alpha,
+            # a_sim=a_sim,
+            # beta=beta,
+            # b_sim=beta_sim,
+            freq=freq,
+        )
+
     return weights
 
 
 @log_start_end(log=logger)
 def display_max_div(
-    stocks: List[str],
-    period: str = "3y",
-    start: str = "",
-    end: str = "",
+    symbols: List[str],
+    interval: str = "3y",
+    start_date: str = "",
+    end_date: str = "",
     log_returns: bool = False,
     freq: str = "D",
     maxnan: float = 0.05,
@@ -1644,14 +1701,14 @@ def display_max_div(
 
     Parameters
     ----------
-    stocks : List[str]
+    symbols : List[str]
         List of portfolio tickers
-    period : str, optional
-        Period to look at returns from
-    start: str, optional
-        If not using period, start date string (YYYY-MM-DD)
-    end: str, optional
-        If not using period, end date string (YYYY-MM-DD). If empty use last
+    interval : str, optional
+        interval to look at returns from
+    start_date: str, optional
+        If not using interval, start date string (YYYY-MM-DD)
+    end_date: str, optional
+        If not using interval, end date string (YYYY-MM-DD). If empty use last
         weekday.
     log_returns: bool, optional
         If True calculate log returns, else arithmetic returns. Default value
@@ -1659,9 +1716,9 @@ def display_max_div(
     freq: str, optional
         The frequency used to calculate returns. Default value is 'D'. Possible
         values are:
-            - 'D' for daily returns.
-            - 'W' for weekly returns.
-            - 'M' for monthly returns.
+        - 'D' for daily returns.
+        - 'W' for weekly returns.
+        - 'M' for monthly returns.
 
     maxnan: float, optional
         Max percentage of nan values accepted per asset to be included in
@@ -1669,25 +1726,22 @@ def display_max_div(
     threshold: float, optional
         Value used to replace outliers that are higher to threshold.
     method: str
-        Method used to fill nan values. Default value is 'time'. For more information see
-        `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`_.
+        Method used to fill nan values. Default value is 'time'. For more information see `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`__.
     covariance: str, optional
         The method used to estimate the covariance matrix:
         The default is 'hist'. Possible values are:
 
         - 'hist': use historical estimates.
-        - 'ewma1': use ewma with adjust=True. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
-        - 'ewma2': use ewma with adjust=False. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
+        - 'ewma1': use ewma with adjust=True. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
+        - 'ewma2': use ewma with adjust=False. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
         - 'ledoit': use the Ledoit and Wolf Shrinkage method.
         - 'oas': use the Oracle Approximation Shrinkage method.
         - 'shrunk': use the basic Shrunk Covariance method.
         - 'gl': use the basic Graphical Lasso Covariance method.
-        - 'jlogo': use the j-LoGo Covariance method. For more information see: :cite:`a-jLogo`.
-        - 'fixed': denoise using fixed method. For more information see chapter 2 of :cite:`a-MLforAM`.
-        - 'spectral': denoise using spectral method. For more information see chapter 2 of :cite:`a-MLforAM`.
-        - 'shrink': denoise using shrink method. For more information see chapter 2 of :cite:`a-MLforAM`.
+        - 'jlogo': use the j-LoGo Covariance method. For more information see: `a-jLogo`.
+        - 'fixed': denoise using fixed method. For more information see chapter 2 of `a-MLforAM`.
+        - 'spectral': denoise using spectral method. For more information see chapter 2 of `a-MLforAM`.
+        - 'shrink': denoise using shrink method. For more information see chapter 2 of `a-MLforAM`.
 
     d_ewma: float, optional
         The smoothing factor of ewma methods.
@@ -1699,14 +1753,14 @@ def display_max_div(
     table: bool, optional
         True if plot table weights, by default False
     """
-    p = d_period(period, start, end)
+    p = d_period(interval, start_date, end_date)
     s_title = f"{p} Maximal diversification portfolio\n"
 
     weights, stock_returns = optimizer_model.get_max_diversification_portfolio(
-        stocks=stocks,
-        period=period,
-        start=start,
-        end=end,
+        symbols=symbols,
+        interval=interval,
+        start_date=start_date,
+        end_date=end_date,
         log_returns=log_returns,
         freq=freq,
         maxnan=maxnan,
@@ -1722,11 +1776,11 @@ def display_max_div(
         return {}
 
     if table:
-        console.print("\n", s_title)
+        console.print(s_title)
         display_weights(weights)
         portfolio_performance(
             weights=weights,
-            stock_returns=stock_returns,
+            data=stock_returns,
             risk_measure="MV",
             risk_free_rate=0,
             # alpha=0.05,
@@ -1735,17 +1789,16 @@ def display_max_div(
             # b_sim=None,
             freq=freq,
         )
-        console.print("")
 
     return weights
 
 
 @log_start_end(log=logger)
 def display_max_decorr(
-    stocks: List[str],
-    period: str = "3y",
-    start: str = "",
-    end: str = "",
+    symbols: List[str],
+    interval: str = "3y",
+    start_date: str = "",
+    end_date: str = "",
     log_returns: bool = False,
     freq: str = "D",
     maxnan: float = 0.05,
@@ -1762,14 +1815,14 @@ def display_max_decorr(
 
     Parameters
     ----------
-    stocks : List[str]
+    symbols : List[str]
         List of portfolio tickers
-    period : str, optional
-        Period to look at returns from
-    start: str, optional
-        If not using period, start date string (YYYY-MM-DD)
-    end: str, optional
-        If not using period, end date string (YYYY-MM-DD). If empty use last
+    interval : str, optional
+        interval to look at returns from
+    start_date: str, optional
+        If not using interval, start date string (YYYY-MM-DD)
+    end_date: str, optional
+        If not using interval, end date string (YYYY-MM-DD). If empty use last
         weekday.
     log_returns: bool, optional
         If True calculate log returns, else arithmetic returns. Default value
@@ -1777,9 +1830,9 @@ def display_max_decorr(
     freq: str, optional
         The frequency used to calculate returns. Default value is 'D'. Possible
         values are:
-            - 'D' for daily returns.
-            - 'W' for weekly returns.
-            - 'M' for monthly returns.
+        - 'D' for daily returns.
+        - 'W' for weekly returns.
+        - 'M' for monthly returns.
 
     maxnan: float, optional
         Max percentage of nan values accepted per asset to be included in
@@ -1787,25 +1840,22 @@ def display_max_decorr(
     threshold: float, optional
         Value used to replace outliers that are higher to threshold.
     method: str
-        Method used to fill nan values. Default value is 'time'. For more information see
-        `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`_.
+        Method used to fill nan values. Default value is 'time'. For more information see `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`__.
     covariance: str, optional
         The method used to estimate the covariance matrix:
         The default is 'hist'. Possible values are:
 
         - 'hist': use historical estimates.
-        - 'ewma1': use ewma with adjust=True. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
-        - 'ewma2': use ewma with adjust=False. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
+        - 'ewma1': use ewma with adjust=True. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
+        - 'ewma2': use ewma with adjust=False. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
         - 'ledoit': use the Ledoit and Wolf Shrinkage method.
         - 'oas': use the Oracle Approximation Shrinkage method.
         - 'shrunk': use the basic Shrunk Covariance method.
         - 'gl': use the basic Graphical Lasso Covariance method.
-        - 'jlogo': use the j-LoGo Covariance method. For more information see: :cite:`a-jLogo`.
-        - 'fixed': denoise using fixed method. For more information see chapter 2 of :cite:`a-MLforAM`.
-        - 'spectral': denoise using spectral method. For more information see chapter 2 of :cite:`a-MLforAM`.
-        - 'shrink': denoise using shrink method. For more information see chapter 2 of :cite:`a-MLforAM`.
+        - 'jlogo': use the j-LoGo Covariance method. For more information see: `a-jLogo`.
+        - 'fixed': denoise using fixed method. For more information see chapter 2 of `a-MLforAM`.
+        - 'spectral': denoise using spectral method. For more information see chapter 2 of `a-MLforAM`.
+        - 'shrink': denoise using shrink method. For more information see chapter 2 of `a-MLforAM`.
 
     d_ewma: float, optional
         The smoothing factor of ewma methods.
@@ -1817,14 +1867,14 @@ def display_max_decorr(
     table: bool, optional
         True if plot table weights, by default False
     """
-    p = d_period(period, start, end)
+    p = d_period(interval, start_date, end_date)
     s_title = f"{p} Maximal decorrelation portfolio\n"
 
     weights, stock_returns = optimizer_model.get_max_decorrelation_portfolio(
-        stocks=stocks,
-        period=period,
-        start=start,
-        end=end,
+        symbols=symbols,
+        interval=interval,
+        start_date=start_date,
+        end_date=end_date,
         log_returns=log_returns,
         freq=freq,
         maxnan=maxnan,
@@ -1841,11 +1891,11 @@ def display_max_decorr(
         return {}
 
     if table:
-        console.print("\n", s_title)
+        console.print(s_title)
         display_weights(weights)
         portfolio_performance(
             weights=weights,
-            stock_returns=stock_returns,
+            data=stock_returns,
             risk_measure="MV",
             risk_free_rate=0,
             # alpha=alpha,
@@ -1854,25 +1904,24 @@ def display_max_decorr(
             # b_simb_sim,
             freq=freq,
         )
-        console.print("")
 
     return weights
 
 
 @log_start_end(log=logger)
 def display_black_litterman(
-    stocks: List[str],
-    p_views: List,
-    q_views: List,
-    period: str = "3y",
-    start: str = "",
-    end: str = "",
+    symbols: List[str],
+    p_views: List = None,
+    q_views: List = None,
+    benchmark: Dict = None,
+    interval: str = "3y",
+    start_date: str = "",
+    end_date: str = "",
     log_returns: bool = False,
     freq: str = "D",
     maxnan: float = 0.05,
     threshold: float = 0,
     method: str = "time",
-    benchmark: Dict = None,
     objective: str = "Sharpe",
     risk_free_rate: float = 0,
     risk_aversion: float = 1,
@@ -1888,19 +1937,19 @@ def display_black_litterman(
 
     Parameters
     ----------
-    stocks : List[str]
+    symbols : List[str]
         List of portfolio tickers
     p_views: List
         Matrix P of views that shows relationships among assets and returns.
         Default value to None.
     q_views: List
         Matrix Q of expected returns of views. Default value is None.
-    period : str, optional
-        Period to look at returns from
-    start: str, optional
-        If not using period, start date string (YYYY-MM-DD)
-    end: str, optional
-        If not using period, end date string (YYYY-MM-DD). If empty use last
+    interval : str, optional
+        interval to look at returns from
+    start_date: str, optional
+        If not using interval, start date string (YYYY-MM-DD)
+    end_date: str, optional
+        If not using interval, end date string (YYYY-MM-DD). If empty use last
         weekday.
     log_returns: bool, optional
         If True calculate log returns, else arithmetic returns. Default value
@@ -1908,9 +1957,9 @@ def display_black_litterman(
     freq: str, optional
         The frequency used to calculate returns. Default value is 'D'. Possible
         values are:
-            - 'D' for daily returns.
-            - 'W' for weekly returns.
-            - 'M' for monthly returns.
+        - 'D' for daily returns.
+        - 'W' for weekly returns.
+        - 'M' for monthly returns.
 
     maxnan: float, optional
         Max percentage of nan values accepted per asset to be included in
@@ -1918,8 +1967,7 @@ def display_black_litterman(
     threshold: float, optional
         Value used to replace outliers that are higher to threshold.
     method: str
-        Method used to fill nan values. Default value is 'time'. For more information see
-        `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`_.
+        Method used to fill nan values. Default value is 'time'. For more information see `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`__.
     benchmark : Dict
         Dict of portfolio weights
     objective: str
@@ -1953,16 +2001,16 @@ def display_black_litterman(
     table: bool, optional
         True if plot table weights, by default False
     """
-    p = d_period(period, start, end)
+    p = d_period(interval, start_date, end_date)
     s_title = f"{p} Black Litterman portfolio\n"
     weights, stock_returns = optimizer_model.get_black_litterman_portfolio(
-        stocks=stocks,
+        symbols=symbols,
         benchmark=benchmark,
         p_views=p_views,
         q_views=q_views,
-        period=period,
-        start=start,
-        end=end,
+        interval=interval,
+        start_date=start_date,
+        end_date=end_date,
         log_returns=log_returns,
         freq=freq,
         maxnan=maxnan,
@@ -1983,11 +2031,11 @@ def display_black_litterman(
         return {}
 
     if table:
-        console.print("\n", s_title)
+        console.print(s_title)
         display_weights(weights)
         portfolio_performance(
             weights=weights,
-            stock_returns=stock_returns,
+            data=stock_returns,
             risk_measure="MV",
             risk_free_rate=0,
             # alpha=alpha,
@@ -1996,17 +2044,16 @@ def display_black_litterman(
             # b_simb_sim,
             freq=freq,
         )
-        console.print("")
 
     return weights
 
 
 @log_start_end(log=logger)
 def display_ef(
-    stocks: List[str],
-    period: str = "3y",
-    start: str = "",
-    end: str = "",
+    symbols: List[str],
+    interval: str = "3y",
+    start_date: str = "",
+    end_date: str = "",
     log_returns: bool = False,
     freq: str = "D",
     maxnan: float = 0.05,
@@ -2028,14 +2075,14 @@ def display_ef(
 
     Parameters
     ----------
-    stocks : List[str]
+    symbols : List[str]
         List of portfolio tickers
-    period : str, optional
-        Period to look at returns from
-    start: str, optional
-        If not using period, start date string (YYYY-MM-DD)
-    end: str, optional
-        If not using period, end date string (YYYY-MM-DD). If empty use last
+    interval : str, optional
+        interval to look at returns from
+    start_date: str, optional
+        If not using interval, start date string (YYYY-MM-DD)
+    end_date: str, optional
+        If not using interval, end date string (YYYY-MM-DD). If empty use last
         weekday.
     log_returns: bool, optional
         If True calculate log returns, else arithmetic returns. Default value
@@ -2043,9 +2090,9 @@ def display_ef(
     freq: str, optional
         The frequency used to calculate returns. Default value is 'D'. Possible
         values are:
-            - 'D' for daily returns.
-            - 'W' for weekly returns.
-            - 'M' for monthly returns.
+        - 'D' for daily returns.
+        - 'W' for weekly returns.
+        - 'M' for monthly returns.
 
     maxnan: float, optional
         Max percentage of nan values accepted per asset to be included in
@@ -2053,8 +2100,7 @@ def display_ef(
     threshold: float, optional
         Value used to replace outliers that are higher to threshold.
     method: str
-        Method used to fill nan values. Default value is 'time'. For more information see
-        `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`_.
+        Method used to fill nan values. Default value is 'time'. For more information see `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`__.
     risk_measure: str, optional
         The risk measure used to optimize the portfolio.
         The default is 'MV'. Possible values are:
@@ -2074,7 +2120,7 @@ def display_ef(
         - 'MDD': Maximum Drawdown of uncompounded cumulative returns.
 
     risk_free_rate: float, optional
-        Risk free rate, must be in the same period of assets returns. Used for
+        Risk free rate, must be in the same interval of assets returns. Used for
         'FLPM' and 'SLPM' and Sharpe objective function. The default is 0.
     alpha: float, optional
         Significance level of CVaR, EVaR, CDaR and EDaR
@@ -2094,96 +2140,39 @@ def display_ef(
     plot_tickers: bool
         Whether to plot the tickers for the assets
     """
-    stock_prices = yahoo_finance_model.process_stocks(stocks, period, start, end)
-    stock_returns = yahoo_finance_model.process_returns(
-        stock_prices,
+
+    frontier, mu, cov, stock_returns, weights, X1, Y1, port = optimizer_model.get_ef(
+        symbols=symbols,
+        interval=interval,
+        start_date=start_date,
+        end_date=end_date,
         log_returns=log_returns,
         freq=freq,
         maxnan=maxnan,
         threshold=threshold,
         method=method,
-    )
-
-    risk_free_rate = risk_free_rate / time_factor[freq.upper()]
-
-    # Building the portfolio object
-    port = rp.Portfolio(returns=stock_returns, alpha=alpha)
-
-    # Estimate input parameters:
-    port.assets_stats(method_mu="hist", method_cov="hist")
-
-    # Budget constraints
-    port.upperlng = value
-    if value_short > 0:
-        port.sht = True
-        port.uppersht = value_short
-        port.budget = value - value_short
-    else:
-        port.budget = value
-
-    # Estimate tangency portfolio:
-    weights = port.optimization(
-        model="Classic",
-        rm=risk_choices[risk_measure],
-        obj="Sharpe",
-        rf=risk_free_rate,
-        hist=True,
-    )
-
-    points = 20  # Number of points of the frontier
-    frontier = port.efficient_frontier(
-        model="Classic",
-        rm=risk_choices[risk_measure],
-        points=points,
-        rf=risk_free_rate,
-        hist=True,
-    )
-
-    random_weights = optimizer_model.generate_random_portfolios(
-        stocks=stocks,
+        risk_measure=risk_measure,
+        risk_free_rate=risk_free_rate,
+        alpha=alpha,
+        value=value,
+        value_short=value_short,
         n_portfolios=n_portfolios,
         seed=seed,
     )
 
-    mu = stock_returns.mean().to_frame().T
-    cov = stock_returns.cov()
-    Y = (mu @ frontier).to_numpy() * time_factor[freq.upper()]
-    Y = np.ravel(Y)
-    X = np.zeros_like(Y)
-
-    for i in range(frontier.shape[1]):
-        w = np.array(frontier.iloc[:, i], ndmin=2).T
-        risk = rp.Sharpe_Risk(
-            w,
-            cov=cov,
-            returns=stock_returns,
-            rm=risk_choices[risk_measure],
-            rf=risk_free_rate,
-            alpha=alpha,
-            # a_sim=a_sim,
-            # beta=beta,
-            # b_sim=b_sim,
-        )
-        X[i] = risk
-
-    if risk_choices[risk_measure] not in ["ADD", "MDD", "CDaR", "EDaR", "UCI"]:
-        X = X * time_factor[freq.upper()] ** 0.5
-    f = interp1d(X, Y, kind="quadratic")
-    X1 = np.linspace(X[0], X[-1], num=100)
-    Y1 = f(X1)
+    risk_free_rate = risk_free_rate / time_factor[freq.upper()]
 
     if external_axes is None:
         _, ax = plt.subplots(figsize=plot_autoscale(), dpi=PLOT_DPI)
     else:
         ax = external_axes[0]
 
-    frontier = pd.concat([frontier, random_weights], axis=1)
     ax = rp.plot_frontier(
         w_frontier=frontier,
         mu=mu,
         cov=cov,
         returns=stock_returns,
-        rm=risk_choices[risk_measure],
+        rm=risk_choices[risk_measure.lower()],
         rf=risk_free_rate,
         alpha=alpha,
         cmap="RdYlBu",
@@ -2203,14 +2192,20 @@ def display_ef(
             weights,
             cov=cov,
             returns=stock_returns,
-            rm=risk_choices[risk_measure],
+            rm=risk_choices[risk_measure.lower()],
             rf=risk_free_rate,
             alpha=alpha,
             # a_sim=a_sim,
             # beta=beta,
             # b_sim=b_sim,
         )
-        if risk_choices[risk_measure] not in ["ADD", "MDD", "CDaR", "EDaR", "UCI"]:
+        if risk_choices[risk_measure.lower()] not in [
+            "ADD",
+            "MDD",
+            "CDaR",
+            "EDaR",
+            "UCI",
+        ]:
             risk_sharpe = risk_sharpe * time_factor[freq.upper()] ** 0.5
 
         y = ret_sharpe * 1.5
@@ -2234,12 +2229,18 @@ def display_ef(
                 weight_df,
                 cov=port.cov[ticker][ticker],
                 returns=stock_returns.loc[:, [ticker]],
-                rm=risk_choices[risk_measure],
+                rm=risk_choices[risk_measure.lower()],
                 rf=risk_free_rate,
                 alpha=alpha,
             )
 
-            if risk_choices[risk_measure] not in ["MDD", "ADD", "CDaR", "EDaR", "UCI"]:
+            if risk_choices[risk_measure.lower()] not in [
+                "MDD",
+                "ADD",
+                "CDaR",
+                "EDaR",
+                "UCI",
+            ]:
                 risk = risk * time_factor[freq.upper()] ** 0.5
 
             ticker_plot = ticker_plot.append(
@@ -2267,10 +2268,10 @@ def display_ef(
 
 @log_start_end(log=logger)
 def display_risk_parity(
-    stocks: List[str],
-    period: str = "3y",
-    start: str = "",
-    end: str = "",
+    symbols: List[str],
+    interval: str = "3y",
+    start_date: str = "",
+    end_date: str = "",
     log_returns: bool = False,
     freq: str = "D",
     maxnan: float = 0.05,
@@ -2292,14 +2293,14 @@ def display_risk_parity(
 
     Parameters
     ----------
-    stocks : List[str]
+    symbols : List[str]
         List of portfolio tickers
-    period : str
-        Period to look at returns from
-    start: str
-        If not using period, start date string (YYYY-MM-DD)
-    end: str
-        If not using period, end date string (YYYY-MM-DD). If empty use last
+    interval : str
+        interval to look at returns from
+    start_date: str
+        If not using interval, start date string (YYYY-MM-DD)
+    end_date: str
+        If not using interval, end date string (YYYY-MM-DD). If empty use last
         weekday.
     log_returns: bool
         If True calculate log returns, else arithmetic returns. Default value
@@ -2307,10 +2308,10 @@ def display_risk_parity(
     freq: str
         The frequency used to calculate returns. Default value is 'D'. Possible
         values are:
-            - 'D' for daily returns.
-            - 'W' for weekly returns.
-            - 'M' for monthly returns.
-            - X (integer days) for returns calculated every X days.
+        - 'D' for daily returns.
+        - 'W' for weekly returns.
+        - 'M' for monthly returns.
+        - X (integer days) for returns calculated every X days.
 
     maxnan: float
         Max percentage of nan values accepted per asset to be included in
@@ -2318,8 +2319,7 @@ def display_risk_parity(
     threshold: float
         Value used to replace outliers that are higher to threshold.
     method: str
-        Method used to fill nan values. Default value is 'time'. For more information see
-        `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`_.
+        Method used to fill nan values. Default value is 'time'. For more information see `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`__.
     risk_measure: str
         The risk measure used to optimize the portfolio.
         The default is 'MV'. Possible values are:
@@ -2339,7 +2339,7 @@ def display_risk_parity(
         The vector of risk contribution per asset. If empty, the default is
         1/n (number of assets).
     risk_free_rate: float, optional
-        Risk free rate, must be in the same period of assets returns. Used for
+        Risk free rate, must be in the same interval of assets returns. Used for
         'FLPM' and 'SLPM' and Sharpe objective function. The default is 0.
     alpha: float, optional
         Significance level of CVaR, EVaR, CDaR and EDaR
@@ -2350,28 +2350,24 @@ def display_risk_parity(
         The default value is 'hist'. Possible values are:
 
         - 'hist': use historical estimates.
-        - 'ewma1': use ewma with adjust=True. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
-        - 'ewma2': use ewma with adjust=False. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
+        - 'ewma1': use ewma with adjust=True. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
+        - 'ewma2': use ewma with adjust=False. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
 
     covariance: str, optional
         The method used to estimate the covariance matrix:
         The default is 'hist'. Possible values are:
 
         - 'hist': use historical estimates.
-        - 'ewma1': use ewma with adjust=True. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
-        - 'ewma2': use ewma with adjust=False. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
+        - 'ewma1': use ewma with adjust=True. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
+        - 'ewma2': use ewma with adjust=False. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
         - 'ledoit': use the Ledoit and Wolf Shrinkage method.
         - 'oas': use the Oracle Approximation Shrinkage method.
         - 'shrunk': use the basic Shrunk Covariance method.
         - 'gl': use the basic Graphical Lasso Covariance method.
-        - 'jlogo': use the j-LoGo Covariance method. For more information see: :cite:`a-jLogo`.
-        - 'fixed': denoise using fixed method. For more information see chapter 2 of :cite:`a-MLforAM`.
-        - 'spectral': denoise using spectral method. For more information see chapter 2 of :cite:`a-MLforAM`.
-        - 'shrink': denoise using shrink method. For more information see chapter 2 of :cite:`a-MLforAM`.
+        - 'jlogo': use the j-LoGo Covariance method. For more information see: `a-jLogo`.
+        - 'fixed': denoise using fixed method. For more information see chapter 2 of `a-MLforAM`.
+        - 'spectral': denoise using spectral method. For more information see chapter 2 of `a-MLforAM`.
+        - 'shrink': denoise using shrink method. For more information see chapter 2 of `a-MLforAM`.
 
     d_ewma: float, optional
         The smoothing factor of ewma methods.
@@ -2381,14 +2377,14 @@ def display_risk_parity(
     table: bool, optional
         True if plot table weights, by default False
     """
-    p = d_period(period, start, end)
+    p = d_period(interval, start_date, end_date)
     s_title = f"{p} Risk parity portfolio based on risk budgeting approach\n"
     s_title += "using " + risk_names[risk_measure] + " as risk measure\n"
     weights, stock_returns = optimizer_model.get_risk_parity_portfolio(
-        stocks=stocks,
-        period=period,
-        start=start,
-        end=end,
+        symbols=symbols,
+        interval=interval,
+        start_date=start_date,
+        end_date=end_date,
         log_returns=log_returns,
         freq=freq,
         maxnan=maxnan,
@@ -2410,26 +2406,25 @@ def display_risk_parity(
         return {}
 
     if table:
-        console.print("\n", s_title)
+        console.print(s_title)
         display_weights(weights)
         portfolio_performance(
             weights=weights,
-            stock_returns=stock_returns,
+            data=stock_returns,
             risk_measure=risk_choices[risk_measure],
             risk_free_rate=risk_free_rate,
             freq=freq,
         )
-        console.print("")
 
     return weights
 
 
 @log_start_end(log=logger)
 def display_rel_risk_parity(
-    stocks: List[str],
-    period: str = "3y",
-    start: str = "",
-    end: str = "",
+    symbols: List[str],
+    interval: str = "3y",
+    start_date: str = "",
+    end_date: str = "",
     log_returns: bool = False,
     freq: str = "D",
     maxnan: float = 0.05,
@@ -2450,14 +2445,14 @@ def display_rel_risk_parity(
 
     Parameters
     ----------
-    stocks : List[str]
+    symbols : List[str]
         List of portfolio tickers
-    period : str, optional
-        Period to look at returns from
-    start: str, optional
-        If not using period, start date string (YYYY-MM-DD)
-    end: str, optional
-        If not using period, end date string (YYYY-MM-DD). If empty use last
+    interval : str, optional
+        interval to look at returns from
+    start_date: str, optional
+        If not using interval, start date string (YYYY-MM-DD)
+    end_date: str, optional
+        If not using interval, end date string (YYYY-MM-DD). If empty use last
         weekday.
     log_returns: bool, optional
         If True calculate log returns, else arithmetic returns. Default value
@@ -2465,10 +2460,10 @@ def display_rel_risk_parity(
     freq: str, optional
         The frequency used to calculate returns. Default value is 'D'. Possible
         values are:
-            - 'D' for daily returns.
-            - 'W' for weekly returns.
-            - 'M' for monthly returns.
-            - X (integer days) for returns calculated every X days.
+        - 'D' for daily returns.
+        - 'W' for weekly returns.
+        - 'M' for monthly returns.
+        - X (integer days) for returns calculated every X days.
 
     maxnan: float, optional
         Max percentage of nan values accepted per asset to be included in
@@ -2476,8 +2471,7 @@ def display_rel_risk_parity(
     threshold: float, optional
         Value used to replace outliers that are higher to threshold.
     method: str, optional
-        Method used to fill nan values. Default value is 'time'. For more information see
-        `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`_.
+        Method used to fill nan values. Default value is 'time'. For more information see `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`__.
     version : str, optional
         Relaxed risk parity model version. The default is 'A'.
         Possible values are:
@@ -2499,28 +2493,24 @@ def display_rel_risk_parity(
         The default value is 'hist'. Possible values are:
 
         - 'hist': use historical estimates.
-        - 'ewma1': use ewma with adjust=True. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
-        - 'ewma2': use ewma with adjust=False. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
+        - 'ewma1': use ewma with adjust=True. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
+        - 'ewma2': use ewma with adjust=False. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
 
     covariance: str, optional
         The method used to estimate the covariance matrix:
         The default is 'hist'. Possible values are:
 
         - 'hist': use historical estimates.
-        - 'ewma1': use ewma with adjust=True. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
-        - 'ewma2': use ewma with adjust=False. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
+        - 'ewma1': use ewma with adjust=True. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
+        - 'ewma2': use ewma with adjust=False. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
         - 'ledoit': use the Ledoit and Wolf Shrinkage method.
         - 'oas': use the Oracle Approximation Shrinkage method.
         - 'shrunk': use the basic Shrunk Covariance method.
         - 'gl': use the basic Graphical Lasso Covariance method.
-        - 'jlogo': use the j-LoGo Covariance method. For more information see: :cite:`a-jLogo`.
-        - 'fixed': denoise using fixed method. For more information see chapter 2 of :cite:`a-MLforAM`.
-        - 'spectral': denoise using spectral method. For more information see chapter 2 of :cite:`a-MLforAM`.
-        - 'shrink': denoise using shrink method. For more information see chapter 2 of :cite:`a-MLforAM`.
+        - 'jlogo': use the j-LoGo Covariance method. For more information see: `a-jLogo`.
+        - 'fixed': denoise using fixed method. For more information see chapter 2 of `a-MLforAM`.
+        - 'spectral': denoise using spectral method. For more information see chapter 2 of `a-MLforAM`.
+        - 'shrink': denoise using shrink method. For more information see chapter 2 of `a-MLforAM`.
 
     d_ewma: float, optional
         The smoothing factor of ewma methods.
@@ -2530,13 +2520,13 @@ def display_rel_risk_parity(
     table: bool, optional
         True if plot table weights, by default False
     """
-    p = d_period(period, start, end)
+    p = d_period(interval, start_date, end_date)
     s_title = f"{p} Relaxed risk parity portfolio based on least squares approach\n"
     weights, stock_returns = optimizer_model.get_rel_risk_parity_portfolio(
-        stocks=stocks,
-        period=period,
-        start=start,
-        end=end,
+        symbols=symbols,
+        interval=interval,
+        start_date=start_date,
+        end_date=end_date,
         log_returns=log_returns,
         freq=freq,
         maxnan=maxnan,
@@ -2557,25 +2547,24 @@ def display_rel_risk_parity(
         return {}
 
     if table:
-        console.print("\n", s_title)
+        console.print(s_title)
         display_weights(weights)
         portfolio_performance(
             weights=weights,
-            stock_returns=stock_returns,
+            data=stock_returns,
             risk_measure=risk_choices["mv"],
             freq=freq,
         )
-        console.print("")
 
     return weights
 
 
 @log_start_end(log=logger)
 def display_hcp(
-    stocks: List[str],
-    period: str = "3y",
-    start: str = "",
-    end: str = "",
+    symbols: List[str],
+    interval: str = "3y",
+    start_date: str = "",
+    end_date: str = "",
     log_returns: bool = False,
     freq: str = "D",
     maxnan: float = 0.05,
@@ -2593,7 +2582,7 @@ def display_hcp(
     beta: float = None,
     b_sim: int = None,
     linkage: str = "ward",
-    k: int = 0,
+    k: int = None,
     max_k: int = 10,
     bins_info: str = "KN",
     alpha_tail: float = 0.05,
@@ -2607,14 +2596,14 @@ def display_hcp(
 
     Parameters
     ----------
-    stocks : List[str]
+    symbols : List[str]
         List of portfolio tickers
-    period : str
-        Period to look at returns from
-    start: str, optional
-        If not using period, start date string (YYYY-MM-DD)
-    end: str, optional
-        If not using period, end date string (YYYY-MM-DD). If empty use last
+    interval : str
+        interval to look at returns from
+    start_date: str, optional
+        If not using interval, start date string (YYYY-MM-DD)
+    end_date: str, optional
+        If not using interval, end date string (YYYY-MM-DD). If empty use last
         weekday.
     log_returns: bool, optional
         If True calculate log returns, else arithmetic returns. Default value
@@ -2622,9 +2611,9 @@ def display_hcp(
     freq: str, optional
         The frequency used to calculate returns. Default value is 'D'. Possible
         values are:
-            - 'D' for daily returns.
-            - 'W' for weekly returns.
-            - 'M' for monthly returns.
+        - 'D' for daily returns.
+        - 'W' for weekly returns.
+        - 'M' for monthly returns.
 
     maxnan: float, optional
         Max percentage of nan values accepted per asset to be included in
@@ -2632,8 +2621,7 @@ def display_hcp(
     threshold: float, optional
         Value used to replace outliers that are higher to threshold.
     method: str, optional
-        Method used to fill nan values. Default value is 'time'. For more information see
-        `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`_.
+        Method used to fill nan values. Default value is 'time'. For more information see `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`__.
     model: str, optional
         The hierarchical cluster portfolio model used for optimize the
         portfolio. The default is 'HRP'. Possible values are:
@@ -2647,36 +2635,34 @@ def display_hcp(
         metric and clusters. The default is 'pearson'. Possible values are:
 
         - 'pearson': pearson correlation matrix. Distance formula:
-            :math:`D_{i,j} = \\sqrt{0.5(1-\rho^{pearson}_{i,j})}`.
+            .. math:: D_{i,j} = \\sqrt{0.5(1-\\rho^{pearson}_{i,j})}.
         - 'spearman': spearman correlation matrix. Distance formula:
-            :math:`D_{i,j} = \\sqrt{0.5(1-\rho^{spearman}_{i,j})}`.
+            .. math:: D_{i,j} = \\sqrt{0.5(1-\\rho^{spearman}_{i,j})}.
         - 'abs_pearson': absolute value pearson correlation matrix. Distance formula:
-            :math:`D_{i,j} = \\sqrt{(1-|\rho^{pearson}_{i,j}|)}`.
+            .. math:: D_{i,j} = \\sqrt{(1-|\\rho^{pearson}_{i,j}|)}.
         - 'abs_spearman': absolute value spearman correlation matrix. Distance formula:
-            :math:`D_{i,j} = \\sqrt{(1-|\rho^{spearman}_{i,j}|)}`.
+            .. math:: D_{i,j} = \\sqrt{(1-|\\rho^{spearman}_{i,j}|)}.
         - 'distance': distance correlation matrix. Distance formula:
-            :math:`D_{i,j} = \\sqrt{(1-\rho^{distance}_{i,j})}`.
+            .. math:: D_{i,j} = \\sqrt{(1-\\rho^{distance}_{i,j})}.
         - 'mutual_info': mutual information matrix. Distance used is variation information matrix.
         - 'tail': lower tail dependence index matrix. Dissimilarity formula:
-            :math:`D_{i,j} = -\\log{\\lambda_{i,j}}`.
+            .. math:: D_{i,j} = -\\log{\\lambda_{i,j}}.
 
     covariance: str, optional
         The method used to estimate the covariance matrix:
         The default is 'hist'. Possible values are:
 
         - 'hist': use historical estimates.
-        - 'ewma1': use ewma with adjust=True. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
-        - 'ewma2': use ewma with adjust=False. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
+        - 'ewma1': use ewma with adjust=True. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
+        - 'ewma2': use ewma with adjust=False. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
         - 'ledoit': use the Ledoit and Wolf Shrinkage method.
         - 'oas': use the Oracle Approximation Shrinkage method.
         - 'shrunk': use the basic Shrunk Covariance method.
         - 'gl': use the basic Graphical Lasso Covariance method.
-        - 'jlogo': use the j-LoGo Covariance method. For more information see: :cite:`c-jLogo`.
-        - 'fixed': denoise using fixed method. For more information see chapter 2 of :cite:`c-MLforAM`.
-        - 'spectral': denoise using spectral method. For more information see chapter 2 of :cite:`c-MLforAM`.
-        - 'shrink': denoise using shrink method. For more information see chapter 2 of :cite:`c-MLforAM`.
+        - 'jlogo': use the j-LoGo Covariance method. For more information see: `c-jLogo`.
+        - 'fixed': denoise using fixed method. For more information see chapter 2 of `c-MLforAM`.
+        - 'spectral': denoise using spectral method. For more information see chapter 2 of `c-MLforAM`.
+        - 'shrink': denoise using shrink method. For more information see chapter 2 of `c-MLforAM`.
 
     objective: str, optional
         Objective function used by the NCO model.
@@ -2719,7 +2705,7 @@ def display_hcp(
         - 'UCI_Rel': Ulcer Index of compounded cumulative returns.
 
     risk_free_rate: float, optional
-        Risk free rate, must be in the same period of assets returns.
+        Risk free rate, must be in the same interval of assets returns.
         Used for 'FLPM' and 'SLPM'. The default is 0.
     risk_aversion: float, optional
         Risk aversion factor of the 'Utility' objective function.
@@ -2736,8 +2722,7 @@ def display_hcp(
         Number of CVaRs used to approximate Tail Gini of gains. If None it duplicates a_sim value.
         The default is None.
     linkage: str, optional
-        Linkage method of hierarchical clustering. For more information see
-        `linkage <https://docs.scipy.org/doc/scipy/reference/generated/scipy.cluster.hierarchy.linkage.html>`_.
+        Linkage method of hierarchical clustering. For more information see `linkage <https://docs.scipy.org/doc/scipy/reference/generated/scipy.cluster.hierarchy.linkage.html>`__.
         The default is 'single'. Possible values are:
 
         - 'single'.
@@ -2760,12 +2745,9 @@ def display_hcp(
         Number of bins used to calculate variation of information. The default
         value is 'KN'. Possible values are:
 
-        - 'KN': Knuth's choice method. For more information see
-        `knuth_bin_width <https://docs.astropy.org/en/stable/api/astropy.stats.knuth_bin_width.html>`_.
-        - 'FD': Freedman–Diaconis' choice method. For more information see
-        `freedman_bin_width <https://docs.astropy.org/en/stable/api/astropy.stats.freedman_bin_width.html>`_.
-        - 'SC': Scotts' choice method. For more information see
-        `scott_bin_width <https://docs.astropy.org/en/stable/api/astropy.stats.scott_bin_width.html>`_.
+        - 'KN': Knuth's choice method. For more information see `knuth_bin_width <https://docs.astropy.org/en/stable/api/astropy.stats.knuth_bin_width.html>`__.
+        - 'FD': Freedman–Diaconis' choice method. For more information see `freedman_bin_width <https://docs.astropy.org/en/stable/api/astropy.stats.freedman_bin_width.html>`__.
+        - 'SC': Scotts' choice method. For more information see `scott_bin_width <https://docs.astropy.org/en/stable/api/astropy.stats.scott_bin_width.html>`__.
         - 'HGR': Hacine-Gharbi and Ravier' choice method.
 
     alpha_tail: float, optional
@@ -2781,7 +2763,7 @@ def display_hcp(
     table: bool, optional
         True if plot table weights, by default False
     """
-    p = d_period(period, start, end)
+    p = d_period(interval, start_date, end_date)
 
     if model == "HRP":
         s_title = f"{p} Hierarchical risk parity portfolio"
@@ -2795,10 +2777,10 @@ def display_hcp(
     s_title += " linkage and " + risk_names[risk_measure] + " as risk measure\n"
 
     weights, stock_returns = optimizer_model.get_hcp_portfolio(
-        stocks=stocks,
-        period=period,
-        start=start,
-        end=end,
+        symbols=symbols,
+        interval=interval,
+        start_date=start_date,
+        end_date=end_date,
         log_returns=log_returns,
         freq=freq,
         maxnan=maxnan,
@@ -2830,11 +2812,11 @@ def display_hcp(
         return {}
 
     if table:
-        console.print("\n", s_title)
+        console.print(s_title)
         display_weights(weights)
         portfolio_performance(
             weights=weights,
-            stock_returns=stock_returns,
+            data=stock_returns,
             risk_measure=risk_choices[risk_measure],
             risk_free_rate=risk_free_rate,
             alpha=alpha,
@@ -2843,17 +2825,16 @@ def display_hcp(
             b_sim=b_sim,
             freq=freq,
         )
-        console.print("")
 
     return weights
 
 
 @log_start_end(log=logger)
 def display_hrp(
-    stocks: List[str],
-    period: str = "3y",
-    start: str = "",
-    end: str = "",
+    symbols: List[str],
+    interval: str = "3y",
+    start_date: str = "",
+    end_date: str = "",
     log_returns: bool = False,
     freq: str = "D",
     maxnan: float = 0.05,
@@ -2863,11 +2844,12 @@ def display_hrp(
     covariance: str = "hist",
     risk_measure: str = "mv",
     risk_free_rate: float = 0.0,
+    risk_aversion: float = 1.0,
     alpha: float = 0.05,
     a_sim: int = 100,
     beta: float = None,
     b_sim: int = None,
-    linkage: str = "ward",
+    linkage: str = "single",
     k: int = 0,
     max_k: int = 10,
     bins_info: str = "KN",
@@ -2882,14 +2864,14 @@ def display_hrp(
 
     Parameters
     ----------
-    stocks : List[str]
+    symbols : List[str]
         List of portfolio tickers
-    period : str
-        Period to look at returns from
-    start: str, optional
-        If not using period, start date string (YYYY-MM-DD)
-    end: str, optional
-        If not using period, end date string (YYYY-MM-DD). If empty use last
+    interval : str
+        interval to look at returns from
+    start_date: str, optional
+        If not using interval, start date string (YYYY-MM-DD)
+    end_date: str, optional
+        If not using interval, end date string (YYYY-MM-DD). If empty use last
         weekday.
     log_returns: bool, optional
         If True calculate log returns, else arithmetic returns. Default value
@@ -2897,9 +2879,9 @@ def display_hrp(
     freq: str, optional
         The frequency used to calculate returns. Default value is 'D'. Possible
         values are:
-            - 'D' for daily returns.
-            - 'W' for weekly returns.
-            - 'M' for monthly returns.
+        - 'D' for daily returns.
+        - 'W' for weekly returns.
+        - 'M' for monthly returns.
 
     maxnan: float, optional
         Max percentage of nan values accepted per asset to be included in
@@ -2907,43 +2889,40 @@ def display_hrp(
     threshold: float, optional
         Value used to replace outliers that are higher to threshold.
     method: str, optional
-        Method used to fill nan values. Default value is 'time'. For more information see
-        `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`_.
+        Method used to fill nan values. Default value is 'time'. For more information see `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`__.
     codependence: str, optional
         The codependence or similarity matrix used to build the distance
         metric and clusters. The default is 'pearson'. Possible values are:
 
         - 'pearson': pearson correlation matrix. Distance formula:
-            :math:`D_{i,j} = \\sqrt{0.5(1-\rho^{pearson}_{i,j})}`.
+            .. math:: D_{i,j} = \\sqrt{0.5(1-\\rho^{pearson}_{i,j})}.
         - 'spearman': spearman correlation matrix. Distance formula:
-            :math:`D_{i,j} = \\sqrt{0.5(1-\rho^{spearman}_{i,j})}`.
+            .. math:: D_{i,j} = \\sqrt{0.5(1-\\rho^{spearman}_{i,j})}.
         - 'abs_pearson': absolute value pearson correlation matrix. Distance formula:
-            :math:`D_{i,j} = \\sqrt{(1-|\rho^{pearson}_{i,j}|)}`.
+            .. math:: D_{i,j} = \\sqrt{(1-|\\rho^{pearson}_{i,j}|)}.
         - 'abs_spearman': absolute value spearman correlation matrix. Distance formula:
-            :math:`D_{i,j} = \\sqrt{(1-|\rho^{spearman}_{i,j}|)}`.
+            .. math:: D_{i,j} = \\sqrt{(1-|\\rho^{spearman}_{i,j}|)}.
         - 'distance': distance correlation matrix. Distance formula:
-            :math:`D_{i,j} = \\sqrt{(1-\rho^{distance}_{i,j})}`.
+            .. math:: D_{i,j} = \\sqrt{(1-\\rho^{distance}_{i,j})}.
         - 'mutual_info': mutual information matrix. Distance used is variation information matrix.
         - 'tail': lower tail dependence index matrix. Dissimilarity formula:
-            :math:`D_{i,j} = -\\log{\\lambda_{i,j}}`.
+            .. math:: D_{i,j} = -\\log{\\lambda_{i,j}}.
 
     covariance: str, optional
         The method used to estimate the covariance matrix:
         The default is 'hist'. Possible values are:
 
         - 'hist': use historical estimates.
-        - 'ewma1': use ewma with adjust=True. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
-        - 'ewma2': use ewma with adjust=False. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
+        - 'ewma1': use ewma with adjust=True. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
+        - 'ewma2': use ewma with adjust=False. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
         - 'ledoit': use the Ledoit and Wolf Shrinkage method.
         - 'oas': use the Oracle Approximation Shrinkage method.
         - 'shrunk': use the basic Shrunk Covariance method.
         - 'gl': use the basic Graphical Lasso Covariance method.
-        - 'jlogo': use the j-LoGo Covariance method. For more information see: :cite:`c-jLogo`.
-        - 'fixed': denoise using fixed method. For more information see chapter 2 of :cite:`c-MLforAM`.
-        - 'spectral': denoise using spectral method. For more information see chapter 2 of :cite:`c-MLforAM`.
-        - 'shrink': denoise using shrink method. For more information see chapter 2 of :cite:`c-MLforAM`.
+        - 'jlogo': use the j-LoGo Covariance method. For more information see: `c-jLogo`.
+        - 'fixed': denoise using fixed method. For more information see chapter 2 of `c-MLforAM`.
+        - 'spectral': denoise using spectral method. For more information see chapter 2 of `c-MLforAM`.
+        - 'shrink': denoise using shrink method. For more information see chapter 2 of `c-MLforAM`.
 
     risk_measure: str, optional
         The risk measure used to optimize the portfolio. If model is 'NCO',
@@ -2977,8 +2956,11 @@ def display_hrp(
         - 'UCI_Rel': Ulcer Index of compounded cumulative returns.
 
     risk_free_rate: float, optional
-        Risk free rate, must be in the same period of assets returns.
+        Risk free rate, must be in the same interval of assets returns.
         Used for 'FLPM' and 'SLPM'. The default is 0.
+    risk_aversion: float, optional
+        Risk aversion factor of the 'Utility' objective function.
+        The default is 1.
     alpha: float, optional
         Significance level of VaR, CVaR, EDaR, DaR, CDaR, EDaR, Tail Gini of losses.
         The default is 0.05.
@@ -2991,8 +2973,7 @@ def display_hrp(
         Number of CVaRs used to approximate Tail Gini of gains. If None it duplicates a_sim value.
         The default is None.
     linkage: str, optional
-        Linkage method of hierarchical clustering. For more information see
-        `linkage <https://docs.scipy.org/doc/scipy/reference/generated/scipy.cluster.hierarchy.linkage.html>`_.
+        Linkage method of hierarchical clustering. For more information see `linkage <https://docs.scipy.org/doc/scipy/reference/generated/scipy.cluster.hierarchy.linkage.html>`__.
         The default is 'single'. Possible values are:
 
         - 'single'.
@@ -3015,12 +2996,9 @@ def display_hrp(
         Number of bins used to calculate variation of information. The default
         value is 'KN'. Possible values are:
 
-        - 'KN': Knuth's choice method. For more information see
-        `knuth_bin_width <https://docs.astropy.org/en/stable/api/astropy.stats.knuth_bin_width.html>`_.
-        - 'FD': Freedman–Diaconis' choice method. For more information see
-        `freedman_bin_width <https://docs.astropy.org/en/stable/api/astropy.stats.freedman_bin_width.html>`_.
-        - 'SC': Scotts' choice method. For more information see
-        `scott_bin_width <https://docs.astropy.org/en/stable/api/astropy.stats.scott_bin_width.html>`_.
+        - 'KN': Knuth's choice method. For more information see `knuth_bin_width <https://docs.astropy.org/en/stable/api/astropy.stats.knuth_bin_width.html>`__.
+        - 'FD': Freedman–Diaconis' choice method. For more information see `freedman_bin_width <https://docs.astropy.org/en/stable/api/astropy.stats.freedman_bin_width.html>`__.
+        - 'SC': Scotts' choice method. For more information see `scott_bin_width <https://docs.astropy.org/en/stable/api/astropy.stats.scott_bin_width.html>`__.
         - 'HGR': Hacine-Gharbi and Ravier' choice method.
 
     alpha_tail: float, optional
@@ -3038,21 +3016,27 @@ def display_hrp(
     table: bool, optional
         True if plot table weights, by default False
     """
-    weights = display_hcp(
-        stocks=stocks,
-        period=period,
-        start=start,
-        end=end,
+    p = d_period(interval, start_date, end_date)
+
+    s_title = f"{p} Hierarchical risk parity portfolio"
+    s_title += " using " + codependence + " codependence,\n" + linkage
+    s_title += " linkage and " + risk_names[risk_measure] + " as risk measure\n"
+
+    weights, stock_returns = optimizer_model.get_hrp(
+        symbols=symbols,
+        interval=interval,
+        start_date=start_date,
+        end_date=end_date,
         log_returns=log_returns,
         freq=freq,
         maxnan=maxnan,
         threshold=threshold,
         method=method,
-        model="HRP",
         codependence=codependence,
         covariance=covariance,
-        risk_measure=risk_measure,
+        risk_measure=risk_choices[risk_measure],
         risk_free_rate=risk_free_rate,
+        risk_aversion=risk_aversion,
         alpha=alpha,
         a_sim=a_sim,
         beta=beta,
@@ -3065,17 +3049,36 @@ def display_hrp(
         leaf_order=leaf_order,
         d_ewma=d_ewma,
         value=value,
-        table=table,
     )
+
+    if weights is None:
+        console.print("\n", "There is no solution with this parameters")
+        return {}
+
+    if table:
+        console.print(s_title)
+        display_weights(weights)
+        portfolio_performance(
+            weights=weights,
+            data=stock_returns,
+            risk_measure=risk_choices[risk_measure],
+            risk_free_rate=risk_free_rate,
+            alpha=alpha,
+            a_sim=a_sim,
+            beta=beta,
+            b_sim=b_sim,
+            freq=freq,
+        )
+
     return weights
 
 
 @log_start_end(log=logger)
 def display_herc(
-    stocks: List[str],
-    period: str = "3y",
-    start: str = "",
-    end: str = "",
+    symbols: List[str],
+    interval: str = "3y",
+    start_date: str = "",
+    end_date: str = "",
     log_returns: bool = False,
     freq: str = "D",
     maxnan: float = 0.05,
@@ -3085,6 +3088,7 @@ def display_herc(
     covariance: str = "hist",
     risk_measure: str = "mv",
     risk_free_rate: float = 0.0,
+    risk_aversion: float = 1.0,
     alpha: float = 0.05,
     a_sim: int = 100,
     beta: float = None,
@@ -3104,14 +3108,14 @@ def display_herc(
 
     Parameters
     ----------
-    stocks : List[str]
+    symbols : List[str]
         List of portfolio tickers
-    period : str
-        Period to look at returns from
-    start: str, optional
-        If not using period, start date string (YYYY-MM-DD)
-    end: str, optional
-        If not using period, end date string (YYYY-MM-DD). If empty use last
+    interval : str
+        interval to look at returns from
+    start_date: str, optional
+        If not using interval, start date string (YYYY-MM-DD)
+    end_date: str, optional
+        If not using interval, end date string (YYYY-MM-DD). If empty use last
         weekday.
     log_returns: bool, optional
         If True calculate log returns, else arithmetic returns. Default value
@@ -3119,9 +3123,9 @@ def display_herc(
     freq: str, optional
         The frequency used to calculate returns. Default value is 'D'. Possible
         values are:
-            - 'D' for daily returns.
-            - 'W' for weekly returns.
-            - 'M' for monthly returns.
+        - 'D' for daily returns.
+        - 'W' for weekly returns.
+        - 'M' for monthly returns.
 
     maxnan: float, optional
         Max percentage of nan values accepted per asset to be included in
@@ -3129,8 +3133,7 @@ def display_herc(
     threshold: float, optional
         Value used to replace outliers that are higher to threshold.
     method: str, optional
-        Method used to fill nan values. Default value is 'time'. For more information see
-        `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`_.
+        Method used to fill nan values. Default value is 'time'. For more information see `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`__.
     model: str, optional
         The hierarchical cluster portfolio model used for optimize the
         portfolio. The default is 'HRP'. Possible values are:
@@ -3144,36 +3147,34 @@ def display_herc(
         metric and clusters. The default is 'pearson'. Possible values are:
 
         - 'pearson': pearson correlation matrix. Distance formula:
-            :math:`D_{i,j} = \\sqrt{0.5(1-\rho^{pearson}_{i,j})}`.
+            .. math:: D_{i,j} = \\sqrt{0.5(1-\\rho^{pearson}_{i,j})}.
         - 'spearman': spearman correlation matrix. Distance formula:
-            :math:`D_{i,j} = \\sqrt{0.5(1-\rho^{spearman}_{i,j})}`.
+            .. math:: D_{i,j} = \\sqrt{0.5(1-\\rho^{spearman}_{i,j})}.
         - 'abs_pearson': absolute value pearson correlation matrix. Distance formula:
-            :math:`D_{i,j} = \\sqrt{(1-|\rho^{pearson}_{i,j}|)}`.
+            .. math:: D_{i,j} = \\sqrt{(1-|\\rho^{pearson}_{i,j}|)}.
         - 'abs_spearman': absolute value spearman correlation matrix. Distance formula:
-            :math:`D_{i,j} = \\sqrt{(1-|\rho^{spearman}_{i,j}|)}`.
+            .. math:: D_{i,j} = \\sqrt{(1-|\\rho^{spearman}_{i,j}|)}.
         - 'distance': distance correlation matrix. Distance formula:
-            :math:`D_{i,j} = \\sqrt{(1-\rho^{distance}_{i,j})}`.
+            .. math:: D_{i,j} = \\sqrt{(1-\\rho^{distance}_{i,j})}.
         - 'mutual_info': mutual information matrix. Distance used is variation information matrix.
         - 'tail': lower tail dependence index matrix. Dissimilarity formula:
-            :math:`D_{i,j} = -\\log{\\lambda_{i,j}}`.
+            .. math:: D_{i,j} = -\\log{\\lambda_{i,j}}.
 
     covariance: str, optional
         The method used to estimate the covariance matrix:
         The default is 'hist'. Possible values are:
 
         - 'hist': use historical estimates.
-        - 'ewma1': use ewma with adjust=True. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
-        - 'ewma2': use ewma with adjust=False. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
+        - 'ewma1': use ewma with adjust=True. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
+        - 'ewma2': use ewma with adjust=False. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
         - 'ledoit': use the Ledoit and Wolf Shrinkage method.
         - 'oas': use the Oracle Approximation Shrinkage method.
         - 'shrunk': use the basic Shrunk Covariance method.
         - 'gl': use the basic Graphical Lasso Covariance method.
-        - 'jlogo': use the j-LoGo Covariance method. For more information see: :cite:`c-jLogo`.
-        - 'fixed': denoise using fixed method. For more information see chapter 2 of :cite:`c-MLforAM`.
-        - 'spectral': denoise using spectral method. For more information see chapter 2 of :cite:`c-MLforAM`.
-        - 'shrink': denoise using shrink method. For more information see chapter 2 of :cite:`c-MLforAM`.
+        - 'jlogo': use the j-LoGo Covariance method. For more information see: `c-jLogo`.
+        - 'fixed': denoise using fixed method. For more information see chapter 2 of `c-MLforAM`.
+        - 'spectral': denoise using spectral method. For more information see chapter 2 of `c-MLforAM`.
+        - 'shrink': denoise using shrink method. For more information see chapter 2 of `c-MLforAM`.
 
     risk_measure: str, optional
         The risk measure used to optimize the portfolio. If model is 'NCO',
@@ -3207,8 +3208,11 @@ def display_herc(
         - 'UCI_Rel': Ulcer Index of compounded cumulative returns.
 
     risk_free_rate: float, optional
-        Risk free rate, must be in the same period of assets returns.
+        Risk free rate, must be in the same interval of assets returns.
         Used for 'FLPM' and 'SLPM'. The default is 0.
+    risk_aversion: float, optional
+        Risk aversion factor of the 'Utility' objective function.
+        The default is 1.
     alpha: float, optional
         Significance level of VaR, CVaR, EDaR, DaR, CDaR, EDaR, Tail Gini of losses.
         The default is 0.05.
@@ -3221,8 +3225,7 @@ def display_herc(
         Number of CVaRs used to approximate Tail Gini of gains. If None it duplicates a_sim value.
         The default is None.
     linkage: str, optional
-        Linkage method of hierarchical clustering. For more information see
-        `linkage <https://docs.scipy.org/doc/scipy/reference/generated/scipy.cluster.hierarchy.linkage.html>`_.
+        Linkage method of hierarchical clustering. For more information see `linkage <https://docs.scipy.org/doc/scipy/reference/generated/scipy.cluster.hierarchy.linkage.html>`__.
         The default is 'single'. Possible values are:
 
         - 'single'.
@@ -3245,12 +3248,9 @@ def display_herc(
         Number of bins used to calculate variation of information. The default
         value is 'KN'. Possible values are:
 
-        - 'KN': Knuth's choice method. For more information see
-        `knuth_bin_width <https://docs.astropy.org/en/stable/api/astropy.stats.knuth_bin_width.html>`_.
-        - 'FD': Freedman–Diaconis' choice method. For more information see
-        `freedman_bin_width <https://docs.astropy.org/en/stable/api/astropy.stats.freedman_bin_width.html>`_.
-        - 'SC': Scotts' choice method. For more information see
-        `scott_bin_width <https://docs.astropy.org/en/stable/api/astropy.stats.scott_bin_width.html>`_.
+        - 'KN': Knuth's choice method. For more information see `knuth_bin_width <https://docs.astropy.org/en/stable/api/astropy.stats.knuth_bin_width.html>`__.
+        - 'FD': Freedman–Diaconis' choice method. For more information see `freedman_bin_width <https://docs.astropy.org/en/stable/api/astropy.stats.freedman_bin_width.html>`__.
+        - 'SC': Scotts' choice method. For more information see `scott_bin_width <https://docs.astropy.org/en/stable/api/astropy.stats.scott_bin_width.html>`__.
         - 'HGR': Hacine-Gharbi and Ravier' choice method.
 
     alpha_tail: float, optional
@@ -3268,21 +3268,27 @@ def display_herc(
     table: bool, optional
         True if plot table weights, by default False
     """
-    weights = display_hcp(
-        stocks=stocks,
-        period=period,
-        start=start,
-        end=end,
+    p = d_period(interval, start_date, end_date)
+
+    s_title = f"{p} Hierarchical equal risk contribution portfolio"
+    s_title += " using " + codependence + "\ncodependence," + linkage
+    s_title += " linkage and " + risk_names[risk_measure] + " as risk measure\n"
+
+    weights, stock_returns = optimizer_model.get_herc(
+        symbols=symbols,
+        interval=interval,
+        start_date=start_date,
+        end_date=end_date,
         log_returns=log_returns,
         freq=freq,
         maxnan=maxnan,
         threshold=threshold,
         method=method,
-        model="HERC",
         codependence=codependence,
         covariance=covariance,
-        risk_measure=risk_measure,
+        risk_measure=risk_choices[risk_measure],
         risk_free_rate=risk_free_rate,
+        risk_aversion=risk_aversion,
         alpha=alpha,
         a_sim=a_sim,
         beta=beta,
@@ -3295,17 +3301,36 @@ def display_herc(
         leaf_order=leaf_order,
         d_ewma=d_ewma,
         value=value,
-        table=table,
     )
+
+    if weights is None:
+        console.print("\n", "There is no solution with this parameters")
+        return {}
+
+    if table:
+        console.print(s_title)
+        display_weights(weights)
+        portfolio_performance(
+            weights=weights,
+            data=stock_returns,
+            risk_measure=risk_choices[risk_measure],
+            risk_free_rate=risk_free_rate,
+            alpha=alpha,
+            a_sim=a_sim,
+            beta=beta,
+            b_sim=b_sim,
+            freq=freq,
+        )
+
     return weights
 
 
 @log_start_end(log=logger)
 def display_nco(
-    stocks: List[str],
-    period: str = "3y",
-    start: str = "",
-    end: str = "",
+    symbols: List[str],
+    interval: str = "3y",
+    start_date: str = "",
+    end_date: str = "",
     log_returns: bool = False,
     freq: str = "D",
     maxnan: float = 0.05,
@@ -3316,10 +3341,13 @@ def display_nco(
     objective: str = "MinRisk",
     risk_measure: str = "mv",
     risk_free_rate: float = 0.0,
-    risk_aversion: float = 2.0,
+    risk_aversion: float = 1.0,
     alpha: float = 0.05,
+    a_sim: int = 100,
+    beta: float = None,
+    b_sim: int = None,
     linkage: str = "ward",
-    k: int = 0,
+    k: int = None,
     max_k: int = 10,
     bins_info: str = "KN",
     alpha_tail: float = 0.05,
@@ -3329,18 +3357,18 @@ def display_nco(
     table: bool = False,
 ) -> Dict:
     """
-    Builds a nested clustered optimization portfolio
+    Builds a hierarchical equal risk contribution portfolio
 
     Parameters
     ----------
-    stocks : List[str]
+    symbols : List[str]
         List of portfolio tickers
-    period : str
-        Period to look at returns from
-    start: str, optional
-        If not using period, start date string (YYYY-MM-DD)
-    end: str, optional
-        If not using period, end date string (YYYY-MM-DD). If empty use last
+    interval : str
+        interval to look at returns from
+    start_date: str, optional
+        If not using interval, start date string (YYYY-MM-DD)
+    end_date: str, optional
+        If not using interval, end date string (YYYY-MM-DD). If empty use last
         weekday.
     log_returns: bool, optional
         If True calculate log returns, else arithmetic returns. Default value
@@ -3348,9 +3376,9 @@ def display_nco(
     freq: str, optional
         The frequency used to calculate returns. Default value is 'D'. Possible
         values are:
-            - 'D' for daily returns.
-            - 'W' for weekly returns.
-            - 'M' for monthly returns.
+        - 'D' for daily returns.
+        - 'W' for weekly returns.
+        - 'M' for monthly returns.
 
     maxnan: float, optional
         Max percentage of nan values accepted per asset to be included in
@@ -3358,8 +3386,7 @@ def display_nco(
     threshold: float, optional
         Value used to replace outliers that are higher to threshold.
     method: str, optional
-        Method used to fill nan values. Default value is 'time'. For more information see
-        `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`_.
+        Method used to fill nan values. Default value is 'time'. For more information see `interpolate <https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.interpolate.html>`__.
     model: str, optional
         The hierarchical cluster portfolio model used for optimize the
         portfolio. The default is 'HRP'. Possible values are:
@@ -3373,36 +3400,34 @@ def display_nco(
         metric and clusters. The default is 'pearson'. Possible values are:
 
         - 'pearson': pearson correlation matrix. Distance formula:
-            :math:`D_{i,j} = \\sqrt{0.5(1-\rho^{pearson}_{i,j})}`.
+            .. math:: D_{i,j} = \\sqrt{0.5(1-\\rho^{pearson}_{i,j})}.
         - 'spearman': spearman correlation matrix. Distance formula:
-            :math:`D_{i,j} = \\sqrt{0.5(1-\rho^{spearman}_{i,j})}`.
+            .. math:: D_{i,j} = \\sqrt{0.5(1-\\rho^{spearman}_{i,j})}.
         - 'abs_pearson': absolute value pearson correlation matrix. Distance formula:
-            :math:`D_{i,j} = \\sqrt{(1-|\rho^{pearson}_{i,j}|)}`.
+            .. math:: D_{i,j} = \\sqrt{(1-|\\rho^{pearson}_{i,j}|)}.
         - 'abs_spearman': absolute value spearman correlation matrix. Distance formula:
-            :math:`D_{i,j} = \\sqrt{(1-|\rho^{spearman}_{i,j}|)}`.
+            .. math:: D_{i,j} = \\sqrt{(1-|\\rho^{spearman}_{i,j}|)}.
         - 'distance': distance correlation matrix. Distance formula:
-            :math:`D_{i,j} = \\sqrt{(1-\rho^{distance}_{i,j})}`.
+            .. math:: D_{i,j} = \\sqrt{(1-\\rho^{distance}_{i,j})}.
         - 'mutual_info': mutual information matrix. Distance used is variation information matrix.
         - 'tail': lower tail dependence index matrix. Dissimilarity formula:
-            :math:`D_{i,j} = -\\log{\\lambda_{i,j}}`.
+            .. math:: D_{i,j} = -\\log{\\lambda_{i,j}}.
 
     covariance: str, optional
         The method used to estimate the covariance matrix:
         The default is 'hist'. Possible values are:
 
         - 'hist': use historical estimates.
-        - 'ewma1': use ewma with adjust=True. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
-        - 'ewma2': use ewma with adjust=False. For more information see
-        `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`_.
+        - 'ewma1': use ewma with adjust=True. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
+        - 'ewma2': use ewma with adjust=False. For more information see `EWM <https://pandas.pydata.org/pandas-docs/stable/user_guide/window.html#exponentially-weighted-window>`__.
         - 'ledoit': use the Ledoit and Wolf Shrinkage method.
         - 'oas': use the Oracle Approximation Shrinkage method.
         - 'shrunk': use the basic Shrunk Covariance method.
         - 'gl': use the basic Graphical Lasso Covariance method.
-        - 'jlogo': use the j-LoGo Covariance method. For more information see: :cite:`c-jLogo`.
-        - 'fixed': denoise using fixed method. For more information see chapter 2 of :cite:`c-MLforAM`.
-        - 'spectral': denoise using spectral method. For more information see chapter 2 of :cite:`c-MLforAM`.
-        - 'shrink': denoise using shrink method. For more information see chapter 2 of :cite:`c-MLforAM`.
+        - 'jlogo': use the j-LoGo Covariance method. For more information see: `c-jLogo`.
+        - 'fixed': denoise using fixed method. For more information see chapter 2 of `c-MLforAM`.
+        - 'spectral': denoise using spectral method. For more information see chapter 2 of `c-MLforAM`.
+        - 'shrink': denoise using shrink method. For more information see chapter 2 of `c-MLforAM`.
 
     objective: str, optional
         Objective function used by the NCO model.
@@ -3445,7 +3470,7 @@ def display_nco(
         - 'UCI_Rel': Ulcer Index of compounded cumulative returns.
 
     risk_free_rate: float, optional
-        Risk free rate, must be in the same period of assets returns.
+        Risk free rate, must be in the same interval of assets returns.
         Used for 'FLPM' and 'SLPM'. The default is 0.
     risk_aversion: float, optional
         Risk aversion factor of the 'Utility' objective function.
@@ -3462,8 +3487,7 @@ def display_nco(
         Number of CVaRs used to approximate Tail Gini of gains. If None it duplicates a_sim value.
         The default is None.
     linkage: str, optional
-        Linkage method of hierarchical clustering. For more information see
-        `linkage <https://docs.scipy.org/doc/scipy/reference/generated/scipy.cluster.hierarchy.linkage.html>`_.
+        Linkage method of hierarchical clustering. For more information see `linkage <https://docs.scipy.org/doc/scipy/reference/generated/scipy.cluster.hierarchy.linkage.html>`__.
         The default is 'single'. Possible values are:
 
         - 'single'.
@@ -3486,12 +3510,9 @@ def display_nco(
         Number of bins used to calculate variation of information. The default
         value is 'KN'. Possible values are:
 
-        - 'KN': Knuth's choice method. For more information see
-        `knuth_bin_width <https://docs.astropy.org/en/stable/api/astropy.stats.knuth_bin_width.html>`_.
-        - 'FD': Freedman–Diaconis' choice method. For more information see
-        `freedman_bin_width <https://docs.astropy.org/en/stable/api/astropy.stats.freedman_bin_width.html>`_.
-        - 'SC': Scotts' choice method. For more information see
-        `scott_bin_width <https://docs.astropy.org/en/stable/api/astropy.stats.scott_bin_width.html>`_.
+        - 'KN': Knuth's choice method. For more information see `knuth_bin_width <https://docs.astropy.org/en/stable/api/astropy.stats.knuth_bin_width.html>`__.
+        - 'FD': Freedman–Diaconis' choice method. For more information see `freedman_bin_width <https://docs.astropy.org/en/stable/api/astropy.stats.freedman_bin_width.html>`__.
+        - 'SC': Scotts' choice method. For more information see `scott_bin_width <https://docs.astropy.org/en/stable/api/astropy.stats.scott_bin_width.html>`__.
         - 'HGR': Hacine-Gharbi and Ravier' choice method.
 
     alpha_tail: float, optional
@@ -3509,24 +3530,32 @@ def display_nco(
     table: bool, optional
         True if plot table weights, by default False
     """
-    weights = display_hcp(
-        stocks=stocks,
-        period=period,
-        start=start,
-        end=end,
+    p = d_period(interval, start_date, end_date)
+
+    s_title = f"{p} Nested clustered optimization"
+    s_title += " using " + codependence + " codependence,\n" + linkage
+    s_title += " linkage and " + risk_names[risk_measure] + " as risk measure\n"
+
+    weights, stock_returns = optimizer_model.get_nco(
+        symbols=symbols,
+        interval=interval,
+        start_date=start_date,
+        end_date=end_date,
         log_returns=log_returns,
         freq=freq,
         maxnan=maxnan,
         threshold=threshold,
         method=method,
-        model="NCO",
         codependence=codependence,
         covariance=covariance,
-        objective=objective,
-        risk_measure=risk_measure,
+        objective=objectives_choices[objective.lower()],
+        risk_measure=risk_choices[risk_measure],
         risk_free_rate=risk_free_rate,
         risk_aversion=risk_aversion,
         alpha=alpha,
+        a_sim=a_sim,
+        beta=beta,
+        b_sim=b_sim,
         linkage=linkage,
         k=k,
         max_k=max_k,
@@ -3535,8 +3564,27 @@ def display_nco(
         leaf_order=leaf_order,
         d_ewma=d_ewma,
         value=value,
-        table=table,
     )
+
+    if weights is None:
+        console.print("\n", "There is no solution with this parameters")
+        return {}
+
+    if table:
+        console.print(s_title)
+        display_weights(weights)
+        portfolio_performance(
+            weights=weights,
+            data=stock_returns,
+            risk_measure=risk_choices[risk_measure],
+            risk_free_rate=risk_free_rate,
+            alpha=alpha,
+            a_sim=a_sim,
+            beta=beta,
+            b_sim=b_sim,
+            freq=freq,
+        )
+
     return weights
 
 
@@ -3569,11 +3617,11 @@ def pie_chart_weights(
 
     init_stocks = list(weights.keys())
     init_sizes = list(weights.values())
-    stocks = []
+    symbols = []
     sizes = []
     for stock, size in zip(init_stocks, init_sizes):
         if size > 0:
-            stocks.append(stock)
+            symbols.append(stock)
             sizes.append(size)
 
     total_size = np.sum(sizes)
@@ -3587,7 +3635,7 @@ def pie_chart_weights(
     if math.isclose(sum(sizes), 1, rel_tol=0.1):
         _, _, autotexts = ax.pie(
             sizes,
-            labels=stocks,
+            labels=symbols,
             autopct=my_autopct,
             colors=colors,
             textprops=dict(color="white"),
@@ -3600,7 +3648,7 @@ def pie_chart_weights(
     else:
         _, _, autotexts = ax.pie(
             sizes,
-            labels=stocks,
+            labels=symbols,
             autopct="",
             colors=colors,
             textprops=dict(color="white"),
@@ -3653,23 +3701,23 @@ def pie_chart_weights(
 
 @log_start_end(log=logger)
 def additional_plots(
-    weights,
-    stock_returns: pd.DataFrame,
-    category: Dict,
-    title_opt: str,
-    freq: str,
-    risk_measure: str,
-    risk_free_rate: float,
-    alpha: float,
-    a_sim: float,
-    beta: float,
-    b_sim: float,
-    pie: bool,
-    hist: bool,
-    dd: bool,
-    rc_chart: bool,
-    heat: bool,
-    external_axes: Optional[List[plt.Axes]],
+    weights: Dict,
+    data: pd.DataFrame,
+    category: Dict = None,
+    title_opt: str = "",
+    freq: str = "D",
+    risk_measure: str = "MV",
+    risk_free_rate: float = 0,
+    alpha: float = 0.05,
+    a_sim: float = 100,
+    beta: float = None,
+    b_sim: float = None,
+    pie: bool = False,
+    hist: bool = False,
+    dd: bool = False,
+    rc_chart: bool = False,
+    heat: bool = False,
+    external_axes: Optional[List[plt.Axes]] = None,
 ):
     """
     Plot additional charts
@@ -3678,16 +3726,16 @@ def additional_plots(
     ----------
     weights: Dict
         Dict of portfolio weights
-    stock_returns: pd.DataFrame
+    data: pd.DataFrame
         DataFrame of stock returns
     title_opt: str
         Title to be used on the pie chart
     freq: str, optional
         The frequency used to calculate returns. Default value is 'D'. Possible
         values are:
-            - 'D' for daily returns.
-            - 'W' for weekly returns.
-            - 'M' for monthly returns.
+        - 'D' for daily returns.
+        - 'W' for weekly returns.
+        - 'M' for monthly returns.
 
     risk_measure: str, optional
         The risk measure used to optimize the portfolio. If model is 'NCO',
@@ -3721,7 +3769,7 @@ def additional_plots(
         - 'UCI_Rel': Ulcer Index of compounded cumulative returns.
 
     risk_free_rate: float, optional
-        Risk free rate, must be in the same period of assets returns.
+        Risk free rate, must be in the same interval of assets returns.
         Used for 'FLPM' and 'SLPM'. The default is 0.
     alpha: float, optional
         Significance level of VaR, CVaR, EDaR, DaR, CDaR, EDaR, Tail Gini of losses.
@@ -3748,20 +3796,20 @@ def additional_plots(
         Optional axes to plot data on
     """
     if category is not None:
-        weights = pd.DataFrame.from_dict(
+        weights_df = pd.DataFrame.from_dict(
             data=weights, orient="index", columns=["value"], dtype=float
         )
         category_df = pd.DataFrame.from_dict(
             data=category, orient="index", columns=["category"]
         )
-        weights = weights.join(category_df, how="inner")
-        weights.sort_index(inplace=True)
+        weights_df = weights_df.join(category_df, how="inner")
+        weights_df.sort_index(inplace=True)
 
         # Calculating classes returns
-        classes = list(set(weights["category"]))
-        weights_classes = weights.groupby(["category"]).sum()
-        matrix_classes = np.zeros((len(weights), len(classes)))
-        labels = weights["category"].tolist()
+        classes = list(set(weights_df["category"]))
+        weights_classes = weights_df.groupby(["category"]).sum()
+        matrix_classes = np.zeros((len(weights_df), len(classes)))
+        labels = weights_df["category"].tolist()
 
         j_value = 0
         for i in classes:
@@ -3770,23 +3818,23 @@ def additional_plots(
             )
             matrix_classes[:, j_value] = (
                 matrix_classes[:, j_value]
-                * weights["value"]
+                * weights_df["value"]
                 / weights_classes.loc[i, "value"]
             )
             j_value += 1
 
         matrix_classes = pd.DataFrame(
-            matrix_classes, columns=classes, index=weights.index
+            matrix_classes, columns=classes, index=weights_df.index
         )
-        stock_returns = stock_returns @ matrix_classes
-        weights = weights_classes["value"].copy()
-        weights.replace(0, np.nan, inplace=True)
-        weights.dropna(inplace=True)
-        weights.sort_values(ascending=True, inplace=True)
-        stock_returns = stock_returns[weights.index.tolist()]
-        stock_returns.columns = [i.title() for i in stock_returns.columns]
-        weights.index = [i.title() for i in weights.index]
-        weights = weights.to_dict()
+        data = data @ matrix_classes
+        weights_df = weights_classes["value"].copy()
+        weights_df.replace(0, np.nan, inplace=True)
+        weights_df.dropna(inplace=True)
+        weights_df.sort_values(ascending=True, inplace=True)
+        data = data[weights_df.index.tolist()]
+        data.columns = [i.title() for i in data.columns]
+        weights_df.index = [i.title() for i in weights_df.index]
+        weights = weights_df.to_dict()
 
     colors = theme.get_colors()
     if pie:
@@ -3798,9 +3846,7 @@ def additional_plots(
         else:
             ax = external_axes[0]
 
-        ax = rp.plot_hist(
-            stock_returns, w=pd.Series(weights).to_frame(), alpha=alpha, ax=ax
-        )
+        ax = rp.plot_hist(data, w=pd.Series(weights).to_frame(), alpha=alpha, ax=ax)
         ax.legend(fontsize="x-small", loc="best")
 
         # Changing colors
@@ -3828,7 +3874,7 @@ def additional_plots(
         else:
             ax = external_axes[0]
 
-        nav = stock_returns.cumsum()
+        nav = data.cumsum()
         ax = rp.plot_drawdown(
             nav=nav, w=pd.Series(weights).to_frame(), alpha=alpha, ax=ax
         )
@@ -3866,9 +3912,9 @@ def additional_plots(
 
         ax = rp.plot_risk_con(
             w=pd.Series(weights).to_frame(),
-            cov=stock_returns.cov(),
-            returns=stock_returns,
-            rm=risk_choices[risk_measure],
+            cov=data.cov(),
+            returns=data,
+            rm=risk_choices[risk_measure.lower()],
             rf=risk_free_rate,
             alpha=alpha,
             a_sim=a_sim,
@@ -3893,6 +3939,11 @@ def additional_plots(
             theme.visualize_output()
 
     if heat:
+
+        if len(weights) == 1:
+            console.print(f"Heatmap needs at least two values for '{category}'.")
+            return
+
         if external_axes is None:
             _, ax = plt.subplots(figsize=plot_autoscale(), dpi=PLOT_DPI)
         else:
@@ -3904,7 +3955,7 @@ def additional_plots(
             number_of_clusters = None
 
         ax = rp.plot_clusters(
-            returns=stock_returns,
+            returns=data,
             codependence="pearson",
             linkage="ward",
             k=number_of_clusters,
@@ -3961,3 +4012,28 @@ def additional_plots(
 
         if external_axes is None:
             theme.visualize_output(force_tight_layout=True)
+
+
+def display_show(weights: Dict, tables: List[str], categories_dict: Dict[Any, Any]):
+    """Display the results of the optimization.
+
+    Parameters
+    ----------
+    weights : Dict
+        Dictionary of weights.
+    tables : List[str]
+        List of tables to display.
+    categories_dict : Dict[Any, Any]
+        Dictionary of categories.
+    """
+
+    display_weights(weights)
+
+    for t in tables:
+        console.print("")
+        display_categories(
+            weights=weights,
+            categories=categories_dict,
+            column=t,
+            title="Category - " + t.title(),
+        )

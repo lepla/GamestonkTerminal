@@ -1,7 +1,9 @@
 # IMPORTATION STANDARD
+import datetime
 import logging
 import math
-from typing import Union
+from typing import List, Union
+from pathlib import Path
 
 # IMPORTATION THIRDPARTY
 import pandas as pd
@@ -15,15 +17,17 @@ from degiro_connector.trading.models.trading_pb2 import (
     ProductSearch,
     ProductsInfo,
     TopNewsPreview,
+    TransactionsHistory,
     Update,
 )
 
 # IMPORTATION INTERNAL
 import openbb_terminal.config_terminal as config
+from openbb_terminal.rich_config import console
 from openbb_terminal.decorators import log_start_end
+from openbb_terminal.portfolio import portfolio_helper
 
-# pylint: disable=no-member
-# pylint: disable=no-else-return
+# pylint: disable=no-member,no-else-return
 
 
 logger = logging.getLogger(__name__)
@@ -32,14 +36,32 @@ logger = logging.getLogger(__name__)
 class DegiroModel:
     @log_start_end(log=logger)
     def __init__(self):
-        self.__default_credentials = Credentials(
+        self.__default_credentials = self.get_default_credentials()
+        self.__trading_api = self.get_default_trading_api()
+
+    def get_default_credentials(self):
+        """
+        Generate default credentials object from config file
+
+        Returns:
+            Credentials: credentials object with default settings
+        """
+        return Credentials(
             int_account=None,
             username=config.DG_USERNAME,
             password=config.DG_PASSWORD,
             one_time_password=None,
             totp_secret_key=config.DG_TOTP_SECRET,
         )
-        self.__trading_api = TradingAPI(
+
+    def get_default_trading_api(self):
+        """
+        Generate default trading api object from config file
+
+        Returns:
+            TradingAPI: trading api object with default settings
+        """
+        return TradingAPI(
             credentials=self.__default_credentials,
         )
 
@@ -60,7 +82,7 @@ class DegiroModel:
             Positions from which we want extra fields.
 
         Returns
-        -------
+        ----------
         pd.DataFrame
             Positions with additional data.
         """
@@ -141,7 +163,7 @@ class DegiroModel:
             Portfolio returned from the API.
 
         Returns
-        -------
+        ----------
         pd.DataFrame
             Filtered portfolio.
         """
@@ -172,20 +194,27 @@ class DegiroModel:
         return self.__trading_api.delete_order(order_id=order_id)
 
     @log_start_end(log=logger)
-    def companynews(self, isin: str) -> NewsByCompany:
+    def companynews(
+        self, symbol: str, limit: int = 10, offset: int = 0, languages: str = "en,fr"
+    ) -> NewsByCompany:
         trading_api = self.__trading_api
         request = NewsByCompany.Request(
-            isin=isin,
-            limit=10,
-            offset=0,
-            languages="en,fr",
+            isin=symbol,
+            limit=limit,
+            offset=offset,
+            languages=languages,
         )
 
         # FETCH DATA
-        news = trading_api.get_news_by_company(
-            request=request,
-            raw=False,
-        )
+        try:
+            news = trading_api.get_news_by_company(
+                request=request,
+                raw=False,
+            )
+        except Exception as e:
+            e_str = str(e)
+            console.print(f"[red]{e_str}[/red]")
+            news = None
 
         return news
 
@@ -250,7 +279,9 @@ class DegiroModel:
 
     @log_start_end(log=logger)
     def hold_positions(self) -> pd.DataFrame:
-        return self.__hold_fetch_current_positions()
+        if self.check_session_id():
+            return self.__hold_fetch_current_positions()
+        return pd.DataFrame()
 
     @log_start_end(log=logger)
     def lastnews(self, limit: int) -> LatestNews:
@@ -336,3 +367,153 @@ class DegiroModel:
             return None
         else:
             return None
+
+    @log_start_end(log=logger)
+    def get_transactions(
+        self, start: datetime.date, end: datetime.date
+    ) -> pd.DataFrame:
+        trading_api = self.__trading_api
+
+        from_date = TransactionsHistory.Request.Date(
+            year=start.year,
+            month=start.month,
+            day=start.day,
+        )
+        to_date = TransactionsHistory.Request.Date(
+            year=end.year,
+            month=end.month,
+            day=end.day,
+        )
+        request = TransactionsHistory.Request(
+            from_date=from_date,
+            to_date=to_date,
+        )
+
+        transactions_dict = trading_api.get_transactions_history(
+            request=request,
+            raw=True,
+        )
+
+        transactions_df = pd.DataFrame(transactions_dict["data"])
+        transactions_df["productId"] = transactions_df["productId"].astype("int")
+
+        return transactions_df
+
+    @log_start_end(log=logger)
+    def get_products_details(self, product_id_list: List[int]) -> pd.DataFrame:
+        trading_api = self.__trading_api
+
+        product_id_list = list(set(product_id_list))
+
+        request = ProductsInfo.Request()
+        request.products.extend(product_id_list)
+
+        products_info = trading_api.get_products_info(
+            request=request,
+            raw=True,
+        )
+
+        products_df = pd.DataFrame(products_info["data"].values())
+
+        return products_df
+
+    @log_start_end(log=logger)
+    def get_transactions_export(
+        self, start: datetime.date, end: datetime.date, currency: str
+    ) -> pd.DataFrame:
+        transactions_df = self.get_transactions(start=start, end=end)
+        product_id_list = list(transactions_df.productId)
+        products_df = self.get_products_details(product_id_list=product_id_list)
+
+        products_df["productId"] = products_df["id"]
+        transactions_df["productId"] = transactions_df["productId"].astype("int")
+        products_df["productId"] = products_df["productId"].astype("int")
+        transactions_full_df = pd.merge(
+            transactions_df,
+            products_df[{"productId", "symbol", "productType", "isin"}],
+            on="productId",
+        )
+
+        portfolio_df = transactions_full_df.rename(
+            columns={
+                "date": "Date",
+                "isin": "ISIN",
+                "symbol": "Ticker",
+                "productType": "Type",  # STOCK or ETF
+                "price": "Price",
+                "quantity": "Quantity",
+                "buysell": "Side",  # BUY or SELL
+                "totalFeesInBaseCurrency": "Fees",
+            }
+        )
+
+        portfolio_df["Premium"] = 0
+        portfolio_df["Currency"] = currency
+        portfolio_df["Side"] = portfolio_df["Side"].replace({"S": "SELL", "B": "BUY"})
+        portfolio_df["Date"] = pd.to_datetime(
+            portfolio_df["Date"].str.slice(0, 10)
+        ).dt.date
+        columns = [
+            "Date",
+            "ISIN",
+            "Ticker",
+            "Type",
+            "Price",
+            "Quantity",
+            "Fees",
+            "Premium",
+            "Side",
+            "Currency",
+        ]
+        portfolio_df = portfolio_df[columns]
+        portfolio_df = portfolio_df.set_index("Date")
+
+        return portfolio_df
+
+    @staticmethod
+    @log_start_end(log=logger)
+    def export_data(portfolio_df: pd.DataFrame, export: str):
+        # In this scenario the path was provided, e.g. --export pt.csv, pt.jpg
+
+        if "." in export:
+            if export.endswith("csv"):
+                filename = export
+            # In this scenario we use the default filename
+            else:
+                console.print("Wrong export file specified.\n")
+        else:
+            now = datetime.datetime.now()
+            filename = f"{now.strftime('%Y%m%d_%H%M%S')}_paexport_degiro.csv"
+
+        file_path = Path(str(portfolio_helper.DEFAULT_HOLDINGS_PATH), filename)
+
+        portfolio_df.to_csv(file_path)
+
+        console.print(f"Saved file: {file_path}\n")
+
+    @log_start_end(log=logger)
+    def check_session_id(self) -> bool:
+        trading_api = self.__trading_api
+
+        if trading_api.connection_storage.session_id:
+            return True
+        return False
+
+    @log_start_end(log=logger)
+    def reset_sessionid_and_creds(self):
+        # Setting the session_id to None
+        trading_api = self.__trading_api
+        trading_api.connection_storage.session_id = None
+
+        # Resetting the object after logout
+        self.__default_credentials = self.get_default_credentials()
+        self.__trading_api = self.get_default_trading_api()
+
+    @log_start_end(log=logger)
+    def check_credentials(self):
+        self.login()
+        if self.check_session_id():
+            self.logout()
+            return True
+        else:
+            return False

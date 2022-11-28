@@ -5,9 +5,8 @@ __docformat__ = "numpy"
 import logging
 from typing import List, Set
 
-from prompt_toolkit.completion import NestedCompleter
-
 from openbb_terminal import feature_flags as obbff
+from openbb_terminal.custom_prompt_toolkit import NestedCompleter
 from openbb_terminal.decorators import log_start_end
 from openbb_terminal.menu import session
 from openbb_terminal.parent_classes import BaseController
@@ -26,6 +25,7 @@ class BrokersController(BaseController):
     CHOICES_COMMANDS: List = []
     CHOICES_MENUS = ["cb", "ally", "rh", "degiro"]
     PATH = "/portfolio/bro/"
+    CHOICES_GENERATION = True
 
     def __init__(self, queue: List[str] = None):
         """Constructor"""
@@ -35,10 +35,8 @@ class BrokersController(BaseController):
         self.merged_holdings = None
 
         if session and obbff.USE_PROMPT_TOOLKIT:
-            choices: dict = {c: {} for c in self.controller_choices}
-
-            choices["support"] = self.SUPPORT_CHOICES
-
+            choices: dict = self.choices_default
+            self.choices = choices
             self.completer = NestedCompleter.from_nested_dict(choices)
 
     def print_help(self):

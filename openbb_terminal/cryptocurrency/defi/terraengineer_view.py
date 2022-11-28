@@ -19,6 +19,7 @@ from openbb_terminal.helper_funcs import (
     plot_autoscale,
     is_valid_axes_count,
 )
+from openbb_terminal.rich_config import console
 
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,7 @@ def display_terra_asset_history(
     export: str = "",
     external_axes: Optional[List[plt.Axes]] = None,
 ) -> None:
-    """Displays the 30-day history of specified asset in terra address
+    """Plots the 30-day history of specified asset in terra address
     [Source: https://terra.engineer/]
 
     Parameters
@@ -49,6 +50,8 @@ def display_terra_asset_history(
     df = terraengineer_model.get_history_asset_from_terra_address(
         address=address, asset=asset
     )
+    if df.empty:
+        console.print("[red]No data in the provided dataframe[/red]\n")
 
     # This plot has 1 axis
     if not external_axes:
@@ -82,20 +85,21 @@ def display_terra_asset_history(
 def display_anchor_yield_reserve(
     export: str = "", external_axes: Optional[List[plt.Axes]] = None
 ) -> None:
-    """Displays the 30-day history of the Anchor Yield Reserve.
+    """Plots the 30-day history of the Anchor Yield Reserve.
     [Source: https://terra.engineer/]
 
     Parameters
     ----------
     export : str
-        Export dataframe data to csv,json,xlsx file
+        Export dataframe data to csv,json,xlsx file, by default False
     external_axes : Optional[List[plt.Axes]], optional
         External axes (1 axis is expected in the list), by default None
     """
 
-    df = terraengineer_model.get_history_asset_from_terra_address(
-        address="terra1tmnqgvg567ypvsvk6rwsga3srp7e3lg6u0elp8"
-    )
+    df = terraengineer_model.get_anchor_yield_reserve()
+    if df.empty:
+        console.print("[red]No data was found[/red]\n")
+        return
 
     # This plot has 1 axis
     if not external_axes:

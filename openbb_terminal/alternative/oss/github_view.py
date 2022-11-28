@@ -28,16 +28,16 @@ logger = logging.getLogger(__name__)
 def display_star_history(
     repo: str, export: str = "", external_axes: Optional[List[plt.Axes]] = None
 ) -> None:
-    """Display repo summary [Source: https://api.github.com]
+    """Plots repo summary [Source: https://api.github.com].
 
     Parameters
     ----------
     repo : str
-            Repository to display star history. Format: org/repo, e.g., openbb-finance/openbbterminal
+        Repository to display star history. Format: org/repo, e.g., openbb-finance/openbbterminal
     export : str
-            Export dataframe data to csv,json,xlsx file
+        Export dataframe data to csv,json,xlsx file
     external_axes : Optional[List[plt.Axes]], optional
-            External axes (1 axis is expected in the list), by default None
+        External axes (1 axis is expected in the list), by default None
     """
     df = github_model.get_stars_history(repo)
     if not df.empty:
@@ -64,32 +64,28 @@ def display_star_history(
 @log_start_end(log=logger)
 def display_top_repos(
     sortby: str,
-    categories: str,
-    limit: int,
+    categories: str = "",
+    limit: int = 10,
     export: str = "",
     external_axes: Optional[List[plt.Axes]] = None,
 ) -> None:
-    """Display repo summary [Source: https://api.github.com]
+    """Plots repo summary [Source: https://api.github.com].
 
     Parameters
     ----------
     sortby : str
-            Sort repos by {stars, forks}
+        Sort repos by {stars, forks}
     categories : str
-            Check for repo categories. If more than one separate with a comma: e.g., finance,investment. Default: None
+        Check for repo categories. If more than one separate with a comma: e.g., finance,investment. Default: None
     limit : int
-    Number of repos to look at
+        Number of repos to look at
     export : str
-    Export dataframe data to csv,json,xlsx file
+        Export dataframe data to csv,json,xlsx file
     external_axes : Optional[List[plt.Axes]], optional
-    External axes (1 axis is expected in the list), by default None
+        External axes (1 axis is expected in the list), by default None
     """
-    df = github_model.get_top_repos(categories=categories, sortby=sortby, top=limit)
+    df = github_model.get_top_repos(categories=categories, sortby=sortby, limit=limit)
     if not df.empty:
-        if sortby == "forks":
-            df = df.sort_values(by="forks_count")
-        elif sortby == "stars":
-            df = df.sort_values(by="stargazers_count")
         if external_axes is None:
             _, ax = plt.subplots(figsize=(14, 8), dpi=PLOT_DPI)
         elif is_valid_axes_count(external_axes, 1):
@@ -125,24 +121,24 @@ def display_top_repos(
 
 @log_start_end(log=logger)
 def display_repo_summary(repo: str, export: str = "") -> None:
-    """Display repo summary [Source: https://api.github.com]
+    """Prints table showing repo summary [Source: https://api.github.com].
 
     Parameters
     ----------
     repo : str
-            Repository to display summary. Format: org/repo, e.g., openbb-finance/openbbterminal
+        Repository to display summary. Format: org/repo, e.g., openbb-finance/openbbterminal
     export : str
-    Export dataframe data to csv,json,xlsx file
+        Export dataframe data to csv,json,xlsx file
     """
-    df = github_model.get_repo_summary(repo)
-    if not df.empty:
+    data = github_model.get_repo_summary(repo)
+    if not data.empty:
         print_rich_table(
-            df, headers=list(df.columns), show_index=False, title="Repo summary"
+            data, headers=list(data.columns), show_index=False, title="Repo summary"
         )
 
         export_data(
             export,
             os.path.dirname(os.path.abspath(__file__)),
             "rs",
-            df,
+            data,
         )

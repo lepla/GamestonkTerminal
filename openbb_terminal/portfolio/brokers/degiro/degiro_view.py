@@ -6,7 +6,6 @@ from argparse import Namespace
 import pandas as pd
 from degiro_connector.core.helpers import pb_handler
 from degiro_connector.trading.models.trading_pb2 import (
-    Credentials,
     LatestNews,
     NewsByCompany,
     Order,
@@ -19,6 +18,9 @@ from openbb_terminal.decorators import log_start_end
 from openbb_terminal.decorators import check_api_key
 
 # IMPORTATION INTERNAL
+from openbb_terminal.helper_funcs import (
+    print_rich_table,
+)
 from openbb_terminal.portfolio.brokers.degiro.degiro_model import DegiroModel
 from openbb_terminal.rich_config import console, MenuText
 
@@ -68,6 +70,7 @@ class DegiroView:
         mt.add_cmd("companynews")
         mt.add_cmd("lastnews")
         mt.add_cmd("topnews")
+        mt.add_cmd("paexport")
         console.print(text=mt.menu_text, menu="Portfolio - Brokers - Degiro")
 
     @log_start_end(log=logger)
@@ -95,15 +98,20 @@ class DegiroView:
         console.print(f"Following `Order` cancellation failed : {order_id}")
 
     @log_start_end(log=logger)
-    def companynews(self, ns_parser: Namespace):
+    def companynews(
+        self, symbol: str, limit: int = 10, offset: int = 0, languages: str = "en,fr"
+    ):
         # GET ATTRIBUTES
         degiro_model = self.__degiro_model
 
         # FETCH DATA
-        news_by_company = degiro_model.companynews(isin=ns_parser.isin)
+        news_by_company = degiro_model.companynews(
+            symbol=symbol, limit=limit, offset=offset, languages=languages
+        )
 
         # DISPLAY DATA
-        DegiroView.__companynews_display(news_by_company=news_by_company)
+        if news_by_company:
+            DegiroView.__companynews_display(news_by_company=news_by_company)
 
     @staticmethod
     @log_start_end(log=logger)
@@ -306,16 +314,18 @@ class DegiroView:
 
     @log_start_end(log=logger)
     @check_api_key(["DG_USERNAME", "DG_PASSWORD"])
-    def login(self):
+    def login(self, otp: int = None):
         # GET ATTRIBUTES
         degiro_model = self.__degiro_model
-        default_credentials = degiro_model.login_default_credentials()
+        credentials = degiro_model.login_default_credentials()
 
-        credentials = Credentials()
-        credentials.CopyFrom(default_credentials)
+        if otp is not None:
+            credentials.one_time_password = otp
+
         degiro_model.login()
 
-        DegiroView.__login_display_success()
+        if degiro_model.check_session_id():
+            DegiroView.__login_display_success()
 
     @staticmethod
     @log_start_end(log=logger)
@@ -330,6 +340,7 @@ class DegiroView:
         # CALL API
         if degiro_model.logout():
             DegiroView.__logout_display_success()
+            DegiroModel.reset_sessionid_and_creds(self.__degiro_model)
         else:
             DegiroView.__logout_display_fail()
 
@@ -438,7 +449,8 @@ class DegiroView:
         top_news = degiro_model.topnews()
 
         # DISPLAY DATA
-        DegiroView.__topnews_display(top_news=top_news)
+        if top_news:
+            DegiroView.__topnews_display(top_news=top_news)
 
     @staticmethod
     @log_start_end(log=logger)
@@ -489,3 +501,27 @@ class DegiroView:
     @log_start_end(log=logger)
     def __update_display_success():
         console.print("`Order` updated .")
+
+    @log_start_end(log=logger)
+    def transactions_export(self, ns_parser: Namespace):
+        degiro_model = self.__degiro_model
+
+        portfolio_df = degiro_model.get_transactions_export(
+            start=ns_parser.start.date(),
+            end=ns_parser.end.date(),
+            currency=ns_parser.currency,
+        )
+
+        if portfolio_df is not None:
+
+            print_rich_table(
+                df=portfolio_df,
+                headers=list(portfolio_df.columns),
+                show_index=True,
+                title="Degiro Transactions",
+            )
+
+            degiro_model.export_data(portfolio_df, ns_parser.export)
+
+        else:
+            console.print("Error while fetching or processing Transactions.")

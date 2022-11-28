@@ -117,17 +117,18 @@ POSSIBLE_CRYPTOS = [
 
 
 @log_start_end(log=logger)
-def get_overall_withdrawal_fees(top: int = 100) -> pd.DataFrame:
+def get_overall_withdrawal_fees(limit: int = 100) -> pd.DataFrame:
     """Scrapes top coins withdrawal fees
     [Source: https://withdrawalfees.com/]
 
     Parameters
     ----------
-    top: int
+    limit: int
         Number of coins to search, by default n=100, one page has 100 coins, so 1 page is scraped.
+
     Returns
     -------
-    pandas.DataFrame:
+    pd.DataFrame
         Coin, Lowest, Average, Median, Highest, Exchanges Compared
     """
 
@@ -146,13 +147,13 @@ def get_overall_withdrawal_fees(top: int = 100) -> pd.DataFrame:
     df = pd.read_html(str(table))[0]
 
     df["Coin"] = [ticker.text for ticker in tickers_html]
-    df["Highest"] = df["Highest"].apply(
+    df["Lowest"] = df["Lowest"].apply(
         lambda x: f'{x[:x.index(".")+3]} ({x[x.index(".")+3:]})'
         if "." in x and isinstance(x, str)
         else x
     )
 
-    num_pages = int(math.ceil(top / COINS_PER_PAGE))
+    num_pages = int(math.ceil(limit / COINS_PER_PAGE))
     if num_pages > 1:
         for idx in range(2, num_pages + 1):
             withdrawal_fees_homepage = BeautifulSoup(
@@ -182,12 +183,9 @@ def get_overall_exchange_withdrawal_fees() -> pd.DataFrame:
     """Scrapes exchange withdrawal fees
     [Source: https://withdrawalfees.com/]
 
-    Parameters
-    ----------
-
     Returns
     -------
-    pandas.DataFrame:
+    pd.DataFrame
         Exchange, Coins, Lowest, Average, Median, Highest
     """
     exchange_withdrawal_fees = BeautifulSoup(
@@ -216,11 +214,12 @@ def get_crypto_withdrawal_fees(
     ----------
     symbol: str
         Coin to check withdrawal fees. By default bitcoin
+
     Returns
     -------
-    List:
-        - str:              Overall statistics (exchanges, lowest, average and median)
-        - pandas.DataFrame: Exchange, Withdrawal Fee, Minimum Withdrawal Amount
+    List
+        - str: Overall statistics (exchanges, lowest, average and median)
+        - pd.DataFrame: Exchange, Withdrawal Fee, Minimum Withdrawal Amount
     """
     crypto_withdrawal_fees = BeautifulSoup(
         requests.get(

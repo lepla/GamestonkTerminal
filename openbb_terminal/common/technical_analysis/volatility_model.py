@@ -7,6 +7,7 @@ import pandas as pd
 import pandas_ta as ta
 
 from openbb_terminal.decorators import log_start_end
+from openbb_terminal.common.technical_analysis import ta_helpers
 
 logger = logging.getLogger(__name__)
 
@@ -15,15 +16,15 @@ MAMODES = ["ema", "sma", "wma", "hma", "zlma"]
 
 @log_start_end(log=logger)
 def bbands(
-    close_values: pd.Series, length: int = 15, n_std: float = 2, mamode: str = "ema"
+    data: pd.DataFrame, window: int = 15, n_std: float = 2, mamode: str = "ema"
 ) -> pd.DataFrame:
     """Calculate Bollinger Bands
 
     Parameters
     ----------
-    close_values : pd.DataFrame
-        DataFrame of sclose prices
-    length : int
+    data : pd.DataFrame
+        Dataframe of ohlc prices
+    window : int
         Length of window to calculate BB
     n_std : float
         Number of standard deviations to show
@@ -35,10 +36,13 @@ def bbands(
     df_ta: pd.DataFrame
         Dataframe of bollinger band data
     """
+    close_col = ta_helpers.check_columns(data, high=False, low=False)
+    if close_col is None:
+        return pd.DataFrame()
     return pd.DataFrame(
         ta.bbands(
-            close=close_values,
-            length=length,
+            close=data[close_col],
+            length=window,
             std=n_std,
             mamode=mamode,
         )
@@ -47,8 +51,7 @@ def bbands(
 
 @log_start_end(log=logger)
 def donchian(
-    high_prices: pd.Series,
-    low_prices: pd.Series,
+    data: pd.DataFrame,
     upper_length: int = 20,
     lower_length: int = 20,
 ) -> pd.DataFrame:
@@ -56,10 +59,8 @@ def donchian(
 
     Parameters
     ----------
-    high_prices : pd.DataFrame
-        High prices
-    low_prices : pd.DataFrame
-        Low prices
+    data : pd.DataFrame
+        Dataframe of ohlc prices
     upper_length : int
         Length of window to calculate upper channel
     lower_length : int
@@ -70,10 +71,13 @@ def donchian(
     pd.DataFrame
         Dataframe of upper and lower channels
     """
+    close_col = ta_helpers.check_columns(data, close=False)
+    if close_col is None:
+        return pd.DataFrame()
     return pd.DataFrame(
         ta.donchian(
-            high=high_prices,
-            low=low_prices,
+            high=data["High"],
+            low=data["Low"],
             upper_length=upper_length,
             lower_length=lower_length,
         ).dropna()
@@ -82,10 +86,8 @@ def donchian(
 
 @log_start_end(log=logger)
 def kc(
-    high_prices: pd.Series,
-    low_prices: pd.Series,
-    close_prices: pd.Series,
-    length: int = 20,
+    data: pd.DataFrame,
+    window: int = 20,
     scalar: float = 2,
     mamode: str = "ema",
     offset: int = 0,
@@ -94,13 +96,52 @@ def kc(
 
     Parameters
     ----------
-    high_values : pd.DataFrame
-        High prices
-    low_values : pd.DataFrame
-        Low prices
-    close_values : pd.DataFrame
-        Close prices
-    length : int
+    data: pd.DataFrame
+        Dataframe of ohlc prices
+    window : int
+        Length of window
+    scalar: float
+        Scalar value
+    mamode: str
+        Type of filter
+    offset : int
+        Offset value
+
+    Returns
+    -------
+    pd.DataFrame
+        Dataframe of rolling kc
+    """
+    close_col = ta_helpers.check_columns(data)
+    if close_col is None:
+        return pd.DataFrame()
+    return pd.DataFrame(
+        ta.kc(
+            high=data["High"],
+            low=data["Low"],
+            close=data[close_col],
+            length=window,
+            scalar=scalar,
+            mamode=mamode,
+            offset=offset,
+        ).dropna()
+    )
+
+
+@log_start_end(log=logger)
+def atr(
+    data: pd.DataFrame,
+    window: int = 14,
+    mamode: str = "ema",
+    offset: int = 0,
+) -> pd.DataFrame:
+    """Average True Range
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        Dataframe of ohlc prices
+    window : int
         Length of window
     mamode: str
         Type of filter
@@ -109,17 +150,18 @@ def kc(
 
     Returns
     -------
-    df_en : pd.DataFrame
-        Dataframe of rolling kc
+    pd.DataFrame
+        Dataframe of atr
     """
-    # Daily
+    close_col = ta_helpers.check_columns(data)
+    if close_col is None:
+        return pd.DataFrame()
     return pd.DataFrame(
-        ta.kc(
-            high=high_prices,
-            low=low_prices,
-            close=close_prices,
-            length=length,
-            scalar=scalar,
+        ta.atr(
+            high=data["High"],
+            low=data["Low"],
+            close=data[close_col],
+            length=window,
             mamode=mamode,
             offset=offset,
         ).dropna()

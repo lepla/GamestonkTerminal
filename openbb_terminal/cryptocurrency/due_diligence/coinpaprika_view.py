@@ -84,41 +84,37 @@ CURRENCIES = [
 
 @log_start_end(log=logger)
 def display_twitter(
-    coin_id: str = "btc-bitcoin",
-    top: int = 10,
+    symbol: str = "BTC",
+    limit: int = 10,
     sortby: str = "date",
-    descend: bool = False,
+    ascend: bool = True,
     export: str = "",
 ) -> None:
-    """Get twitter timeline for given coin id. Not more than last 50 tweets [Source: CoinPaprika]
+    """Prints table showing twitter timeline for given coin id. Not more than last 50 tweets [Source: CoinPaprika]
 
     Parameters
     ----------
-    coin_id: str
-        Identifier of coin for CoinPaprika API
-    top: int
+    symbol: str
+        Cryptocurrency symbol (e.g. BTC)
+    limit: int
         Number of records to display
     sortby: str
-        Key by which to sort data
-    descend: bool
-        Flag to sort data descending
+        Key by which to sort data. Every column name is valid
+        (see for possible values:
+        https://api.coinpaprika.com/docs#tag/Coins/paths/~1coins~1%7Bcoin_id%7D~1twitter/get).
+    ascend: bool
+        Flag to sort data ascending
     export : str
         Export dataframe data to csv,json,xlsx file
     """
-
-    df = coinpaprika_model.get_coin_twitter_timeline(coin_id)
+    df = coinpaprika_model.get_coin_twitter_timeline(symbol, sortby, ascend)
 
     if df.empty:
-        console.print(f"Couldn't find any tweets for coin {coin_id}", "\n")
+        console.print(f"Couldn't find any tweets for coin {symbol}", "\n")
         return
 
-    df = df.sort_values(by=sortby, ascending=descend)
-    # Remove unicode chars (it breaks pretty tables)
-    df["status"] = df["status"].apply(
-        lambda text: "".join(i if ord(i) < 128 else "" for i in text)
-    )
     print_rich_table(
-        df.head(top),
+        df.head(limit),
         headers=list(df.columns),
         show_index=False,
         title="Twitter Timeline",
@@ -134,38 +130,37 @@ def display_twitter(
 
 @log_start_end(log=logger)
 def display_events(
-    coin_id: str = "btc-bitcoin",
-    top: int = 10,
+    symbol: str = "BTC",
+    limit: int = 10,
     sortby: str = "date",
-    descend: bool = False,
+    ascend: bool = False,
     links: bool = False,
     export: str = "",
 ) -> None:
-    """Get all events for given coin id. [Source: CoinPaprika]
+    """Prints table showing all events for given coin id. [Source: CoinPaprika]
 
     Parameters
     ----------
-    coin_id: str
-        Identifier of coin for CoinPaprika API
-    top: int
+    symbol: str
+        Cryptocurrency symbol (e.g. BTC)
+    limit: int
         Number of records to display
     sortby: str
-        Key by which to sort data
-    descend: bool
-        Flag to sort data descending
+        Key by which to sort data. Every column name is valid
+        (see for possible values:
+        https://api.coinpaprika.com/docs#tag/Coins/paths/~1coins~1%7Bcoin_id%7D~1events/get).
+    ascend: bool
+        Flag to sort data ascending
     links: bool
         Flag to display urls
     export : str
         Export dataframe data to csv,json,xlsx file
     """
-
-    df = coinpaprika_model.get_coin_events_by_id(coin_id)
+    df = coinpaprika_model.get_coin_events_by_id(symbol, sortby, ascend)
 
     if df.empty:
-        console.print(f"Couldn't find any events for coin {coin_id}\n")
+        console.print(f"Couldn't find any events for coin {symbol}\n")
         return
-
-    df = df.sort_values(by=sortby, ascending=descend)
 
     df_data = df.copy()
 
@@ -175,7 +170,7 @@ def display_events(
         df.drop("link", axis=1, inplace=True)
 
     print_rich_table(
-        df.head(top), headers=list(df.columns), show_index=False, title="All Events"
+        df.head(limit), headers=list(df.columns), show_index=False, title="All Events"
     )
 
     export_data(
@@ -188,38 +183,39 @@ def display_events(
 
 @log_start_end(log=logger)
 def display_exchanges(
-    coin_id: str = "btc-bitcoin",
-    top: int = 10,
+    symbol: str = "btc",
+    limit: int = 10,
     sortby: str = "adjusted_volume_24h_share",
-    descend: bool = False,
+    ascend: bool = True,
     export: str = "",
 ) -> None:
-    """Get all exchanges for given coin id. [Source: CoinPaprika]
+    """Prints table showing all exchanges for given coin id. [Source: CoinPaprika]
 
     Parameters
     ----------
-    coin_id: str
-        Identifier of coin for CoinPaprika API
-    top: int
+    symbol: str
+        Cryptocurrency symbol (e.g. BTC)
+    limit: int
         Number of records to display
     sortby: str
-        Key by which to sort data
-    descend: bool
-        Flag to sort data descending
+        Key by which to sort data. Every column name is valid (see for possible values:
+        https://api.coinpaprika.com/v1).
+    ascend: bool
+        Flag to sort data ascending
     export : str
         Export dataframe data to csv,json,xlsx file
     """
-
-    df = coinpaprika_model.get_coin_exchanges_by_id(coin_id)
+    df = coinpaprika_model.get_coin_exchanges_by_id(symbol, sortby, ascend)
 
     if df.empty:
         console.print("No data found", "\n")
         return
 
-    df = df.sort_values(by=sortby, ascending=descend)
-
     print_rich_table(
-        df.head(top), headers=list(df.columns), show_index=False, title="All Exchanges"
+        df.head(limit),
+        headers=list(df.columns),
+        show_index=False,
+        title="All Exchanges",
     )
 
     export_data(
@@ -232,44 +228,41 @@ def display_exchanges(
 
 @log_start_end(log=logger)
 def display_markets(
-    coin_id: str = "btc-bitcoin",
-    currency: str = "USD",
-    top: int = 20,
+    from_symbol: str = "BTC",
+    to_symbol: str = "USD",
+    limit: int = 20,
     sortby: str = "pct_volume_share",
-    descend: bool = False,
+    ascend: bool = True,
     links: bool = False,
     export: str = "",
 ) -> None:
-    """Get all markets for given coin id. [Source: CoinPaprika]
+    """Prints table showing all markets for given coin id. [Source: CoinPaprika]
 
     Parameters
     ----------
-    coin_id: str
-        Identifier of coin for CoinPaprika API
-    currency: str
+    from_symbol: str
+        Cryptocurrency symbol (e.g. BTC)
+    to_symbol: str
         Quoted currency
-    top: int
+    limit: int
         Number of records to display
     sortby: str
-        Key by which to sort data
-    descend: bool
-        Flag to sort data descending
+        Key by which to sort data. Every column name is valid (see for possible values:
+        https://api.coinpaprika.com/v1).
+    ascend: bool
+        Flag to sort data ascending
     links: bool
         Flag to display urls
     export : str
         Export dataframe data to csv,json,xlsx file
     """
-
-    if sortby in ["volume", "price"]:
-        sortby = f"{str(currency).lower()}_{sortby}"
-
-    df = coinpaprika_model.get_coin_markets_by_id(coin_id, currency)
+    df = coinpaprika_model.get_coin_markets_by_id(
+        from_symbol, to_symbol, sortby, ascend
+    )
 
     if df.empty:
         console.print("There is no data \n")
         return
-
-    df = df.sort_values(by=sortby, ascending=descend)
 
     df_data = df.copy()
 
@@ -279,7 +272,7 @@ def display_markets(
         df.drop("market_url", axis=1, inplace=True)
 
     print_rich_table(
-        df.head(top), headers=list(df.columns), show_index=False, title="All Markets"
+        df.head(limit), headers=list(df.columns), show_index=False, title="All Markets"
     )
 
     export_data(
@@ -292,24 +285,23 @@ def display_markets(
 
 @log_start_end(log=logger)
 def display_price_supply(
-    coin_id: str = "btc-bitcoin",
-    currency: str = "USD",
+    from_symbol: str = "BTC",
+    to_symbol: str = "USD",
     export: str = "",
 ) -> None:
-    """Get ticker information for single coin [Source: CoinPaprika]
+    """Prints table showing ticker information for single coin [Source: CoinPaprika]
 
     Parameters
     ----------
-    coin_id: str
-        Identifier of coin for CoinPaprika API
-    currency: str
+    from_symbol: str
+        Cryptocurrency symbol (e.g. BTC)
+    to_symbol: str
         Quoted currency
     export: str
         Export dataframe data to csv,json,xlsx
 
     """
-
-    df = coinpaprika_model.get_tickers_info_for_coin(coin_id, currency)
+    df = coinpaprika_model.get_tickers_info_for_coin(from_symbol, to_symbol)
 
     if df.empty:
         console.print("No data found", "\n")
@@ -331,21 +323,21 @@ def display_price_supply(
 
 @log_start_end(log=logger)
 def display_basic(
-    coin_id: str = "btc-bitcoin",
+    symbol: str = "BTC",
     export: str = "",
 ) -> None:
-    """Get basic information for coin. Like:
-        name, symbol, rank, type, description, platform, proof_type, contract, tags, parent.  [Source: CoinPaprika]
+    """Prints table showing basic information for coin. Like:
+        name, symbol, rank, type, description, platform, proof_type, contract, tags, parent.
+        [Source: CoinPaprika]
 
     Parameters
     ----------
-    coin_id: str
-        Identifier of coin for CoinPaprika API
+    symbol: str
+        Cryptocurrency symbol (e.g. BTC)
     export: str
         Export dataframe data to csv,json,xlsx
     """
-
-    df = coinpaprika_model.basic_coin_info(coin_id)
+    df = coinpaprika_model.basic_coin_info(symbol)
 
     if df.empty:
         console.print("No data available\n")

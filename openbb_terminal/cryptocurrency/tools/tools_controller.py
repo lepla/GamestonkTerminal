@@ -7,14 +7,13 @@ import argparse
 import logging
 from typing import List
 
-from prompt_toolkit.completion import NestedCompleter
+from openbb_terminal.custom_prompt_toolkit import NestedCompleter
 
 from openbb_terminal import feature_flags as obbff
 from openbb_terminal.decorators import log_start_end
 from openbb_terminal.helper_funcs import (
     EXPORT_ONLY_RAW_DATA_ALLOWED,
-    check_non_negative_float,
-    check_percentage_range,
+    check_non_negative,
     check_positive,
     check_positive_float,
 )
@@ -32,15 +31,14 @@ class ToolsController(BaseController):
     CHOICES_COMMANDS = ["aprtoapy", "il"]
 
     PATH = "/crypto/tools/"
+    CHOICES_GENERATION = True
 
     def __init__(self, queue: List[str] = None):
         """Constructor"""
         super().__init__(queue)
 
         if session and obbff.USE_PROMPT_TOOLKIT:
-            choices: dict = {c: {} for c in self.controller_choices}
-
-            choices["support"] = self.SUPPORT_CHOICES
+            choices: dict = self.choices_default
 
             self.completer = NestedCompleter.from_nested_dict(choices)
 
@@ -62,32 +60,36 @@ class ToolsController(BaseController):
             Users can provide percentages increases for two tokens (and their weight in the liquidity pool)
             and verify the impermanent loss that can occur.""",
         )
-
         parser.add_argument(
-            "-pcA",
+            "-a",
             "--priceChangeA",
             dest="priceChangeA",
-            type=check_non_negative_float,
+            type=check_non_negative,
             help="Token A price change in percentage",
             default=0,
+            choices=range(1, 101),
+            metavar="PRICECHANGEA",
         )
-
         parser.add_argument(
-            "-pcB",
+            "-b",
             "--priceChangeB",
             dest="priceChangeB",
-            type=check_non_negative_float,
+            type=check_non_negative,
             help="Token B price change in percentage",
             default=100,
+            choices=range(1, 101),
+            metavar="PRICECHANGEB",
         )
         parser.add_argument(
             "-p",
             "--proportion",
             dest="proportion",
-            type=check_percentage_range,
+            type=check_positive,
             help="""Pool proportion. E.g., 50 means that pool contains 50%% of token A and 50%% of token B,
             30 means that pool contains 30%% of token A and 70%% of token B""",
             default=50,
+            choices=range(1, 101),
+            metavar="PROPORTION",
         )
 
         parser.add_argument(
@@ -98,7 +100,6 @@ class ToolsController(BaseController):
             help="Initial amount of dollars that user provides to liquidity pool",
             default=1000,
         )
-
         parser.add_argument(
             "-n",
             "--narrative",
@@ -107,9 +108,8 @@ class ToolsController(BaseController):
             help="Flag to show narrative instead of dataframe",
             default=False,
         )
-
         if other_args and not other_args[0][0] == "-":
-            other_args.insert(0, "-pcA")
+            other_args.insert(0, "-a")
 
         ns_parser = self.parse_known_args_and_warn(
             parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
@@ -138,15 +138,15 @@ class ToolsController(BaseController):
                       can be defined with -c argument.
                   """,
         )
-
         parser.add_argument(
             "--apr",
             dest="apr",
-            type=check_positive_float,
+            type=check_positive,
             help="APR value in percentage to convert",
             default=100,
+            choices=range(1, 101),
+            metavar="APR",
         )
-
         parser.add_argument(
             "-c",
             "--compounding",
@@ -154,6 +154,8 @@ class ToolsController(BaseController):
             type=check_positive,
             help="Number of compounded periods in a year. 12 means compounding monthly",
             default=12,
+            choices=range(1, 101),
+            metavar="COMPOUNDING",
         )
         parser.add_argument(
             "-n",

@@ -3,41 +3,46 @@ __docformat__ = "numpy"
 
 import argparse
 import logging
-import os
 from datetime import datetime, timedelta
-from typing import List
+from typing import Any, List
 
 import pandas as pd
-from prompt_toolkit.completion import NestedCompleter
 
 from openbb_terminal import feature_flags as obbff
-from openbb_terminal.config_terminal import TRADIER_TOKEN
+from openbb_terminal.config_terminal import API_TRADIER_TOKEN
+from openbb_terminal.custom_prompt_toolkit import NestedCompleter
 from openbb_terminal.decorators import log_start_end
 from openbb_terminal.helper_funcs import (
     EXPORT_BOTH_RAW_DATA_AND_FIGURES,
     EXPORT_ONLY_FIGURES_ALLOWED,
     EXPORT_ONLY_RAW_DATA_ALLOWED,
+    parse_and_split_input,
     valid_date,
 )
 from openbb_terminal.menu import session
 from openbb_terminal.parent_classes import BaseController
-from openbb_terminal.rich_config import MenuText, console
+from openbb_terminal.rich_config import MenuText, console, get_ordered_list_sources
 from openbb_terminal.stocks.options import (
     alphaquery_view,
     barchart_view,
     calculator_view,
     chartexchange_view,
     fdscanner_view,
+    nasdaq_model,
+    nasdaq_view,
+    op_helpers,
     tradier_model,
     tradier_view,
     yfinance_model,
     yfinance_view,
 )
-
-from openbb_terminal.stocks.options.pricing import pricing_controller
 from openbb_terminal.stocks.options.hedge import hedge_controller
-from openbb_terminal.stocks.options.screen import screener_controller, syncretism_view
-
+from openbb_terminal.stocks.options.pricing import pricing_controller
+from openbb_terminal.stocks.options.screen import (
+    screener_controller,
+    syncretism_model,
+    syncretism_view,
+)
 
 # pylint: disable=R1710,C0302,R0916
 
@@ -45,6 +50,9 @@ from openbb_terminal.stocks.options.screen import screener_controller, syncretis
 #       - At the moment there's too much logic in the controller to implement an
 #         API wrapper. Please refactor functions like 'call_exp'
 
+# TODO: Additional refactoring -- load should bring in a df from the sdk_helpers functions and we can get expirations
+# from there.  Additionally each view function should be made a function that takes the df and plots it instead of
+# getting the new chain
 
 logger = logging.getLogger(__name__)
 
@@ -77,9 +85,7 @@ class OptionsController(BaseController):
         "hedge",
     ]
 
-    PRESET_PATH = os.path.join(os.path.abspath(os.path.dirname(__file__)), "presets/")
-
-    presets = [f.split(".")[0] for f in os.listdir(PRESET_PATH) if f.endswith(".ini")]
+    preset_choices = syncretism_model.get_preset_choices()
 
     grhist_greeks_choices = [
         "iv",
@@ -106,6 +112,7 @@ class OptionsController(BaseController):
     plot_vars_choices = ["ltd", "s", "lp", "b", "a", "c", "pc", "v", "oi", "iv"]
     plot_custom_choices = ["smile"]
     PATH = "/stocks/options/"
+    CHOICES_GENERATION = True
 
     def __init__(self, ticker: str, queue: List[str] = None):
         """Constructor"""
@@ -114,80 +121,118 @@ class OptionsController(BaseController):
         self.ticker = ticker
         self.prices = pd.DataFrame(columns=["Price", "Chance"])
         self.selected_date = ""
-        self.chain = None
+        self.chain: Any = None
+        # Keeps track of initial source of load so we can use correct commands later
+        self.source = ""
 
         if ticker:
-            if TRADIER_TOKEN == "REPLACE_ME":  # nosec
-                console.print("Loaded expiry dates from Yahoo Finance")
+            if API_TRADIER_TOKEN == "REPLACE_ME":  # nosec
+                console.print("Loaded expiry dates from Yahoo Finance\n")
                 self.expiry_dates = yfinance_model.option_expirations(self.ticker)
             else:
-                console.print("Loaded expiry dates from Tradier")
+                console.print("Loaded expiry dates from Tradier\n")
                 self.expiry_dates = tradier_model.option_expirations(self.ticker)
         else:
             self.expiry_dates = []
 
+        self.default_chain = get_ordered_list_sources(f"{self.PATH}chains")[0]
+
         if session and obbff.USE_PROMPT_TOOLKIT:
-            choices: dict = {c: {} for c in self.controller_choices}
-            choices["unu"]["-s"] = {c: {} for c in self.unu_sortby_choices}
-            choices["pcr"] = {c: {} for c in self.pcr_length_choices}
-            choices["disp"] = {c: {} for c in self.presets}
-            choices["scr"] = {c: {} for c in self.presets}
-            choices["grhist"]["-g"] = {c: {} for c in self.grhist_greeks_choices}
-            choices["plot"]["-x"] = {c: {} for c in self.plot_vars_choices}
-            choices["plot"]["-y"] = {c: {} for c in self.plot_vars_choices}
-            choices["plot"]["-c"] = {c: {} for c in self.plot_custom_choices}
+            choices: dict = self.choices_default
+
             # This menu contains dynamic choices that may change during runtime
             self.choices = choices
             self.completer = NestedCompleter.from_nested_dict(choices)
+
+    def parse_input(self, an_input: str) -> List:
+        """Parse controller input
+
+        Overrides the parent class function to handle github org/repo path convention.
+        See `BaseController.parse_input()` for details.
+        """
+        # Filtering out sorting parameters with forward slashes like P/E
+        sort_filter = r"((\ -s |\ --sortby ).*?(Vol\/OI)*)"
+
+        custom_filters = [sort_filter]
+
+        commands = parse_and_split_input(
+            an_input=an_input, custom_filters=custom_filters
+        )
+        return commands
 
     def update_runtime_choices(self):
         """Update runtime choices"""
         if self.expiry_dates and session and obbff.USE_PROMPT_TOOLKIT:
             self.choices["exp"] = {str(c): {} for c in range(len(self.expiry_dates))}
-            self.choices["exp"]["-d"] = {c: {} for c in self.expiry_dates + [""]}
-            if self.chain:
+            self.choices["exp"]["--date"] = {c: {} for c in self.expiry_dates + [""]}
+            self.choices["exp"]["-d"] = "--date"
+            self.choices["exp"]["--source"] = {
+                c: {} for c in get_ordered_list_sources(f"{self.PATH}exp")
+            }
+
+            if isinstance(self.chain, pd.DataFrame):
+                return
+            if self.chain and self.source != "Nasdaq":
+
                 self.choices["hist"] = {
                     str(c): {}
                     for c in self.chain.puts["strike"] + self.chain.calls["strike"]
                 }
-                self.choices["grhist"] = {
+                self.choices["hist"]["--put"] = {}
+                self.choices["hist"]["-p"] = "--put"
+                self.choices["hist"]["--chain"] = None
+                self.choices["hist"]["-c"] = "--chain"
+                self.choices["hist"]["--raw"] = {}
+                self.choices["hist"]["--limit"] = None
+                self.choices["hist"]["-l"] = "--limit"
+                self.choices["grhist"]["--strike"] = {
                     str(c): {}
                     for c in self.chain.puts["strike"] + self.chain.calls["strike"]
                 }
+                self.choices["grhist"]["-s"] = "--strike"
                 self.choices["binom"] = {
                     str(c): {}
                     for c in self.chain.puts["strike"] + self.chain.calls["strike"]
                 }
+                self.choices["binom"]["--put"] = {}
+                self.choices["binom"]["-p"] = "--put"
+                self.choices["binom"]["--european"] = {}
+                self.choices["binom"]["-e"] = "--european"
+                self.choices["binom"]["--xlsx"] = {}
+                self.choices["binom"]["-x"] = "--xlsx"
+                self.choices["binom"]["--plot"] = {}
+                self.choices["binom"]["--volatility"] = None
+                self.choices["binom"]["-v"] = "--volatility"
 
             self.completer = NestedCompleter.from_nested_dict(self.choices)
 
     def print_help(self):
         """Print help."""
         mt = MenuText("stocks/options/")
-        mt.add_cmd("unu", "Fdscanner")
+        mt.add_cmd("unu")
         mt.add_cmd("calc")
         mt.add_raw("\n")
         mt.add_menu("screen")
         mt.add_raw("\n")
         mt.add_cmd("load")
-        mt.add_cmd("exp", "", self.ticker)
+        mt.add_cmd("exp", self.ticker)
         mt.add_raw("\n")
         mt.add_param("_ticker", self.ticker or "")
         mt.add_param("_expiry", self.selected_date or "")
         mt.add_raw("\n")
-        mt.add_cmd("pcr", "AlphaQuery", self.ticker and self.selected_date)
-        mt.add_cmd("info", "Barchart", self.ticker and self.selected_date)
-        mt.add_cmd("chains", "Tradier", self.ticker and self.selected_date)
-        mt.add_cmd("oi", "Tradier/YFinance", self.ticker and self.selected_date)
-        mt.add_cmd("vol", "Tradier/YFinance", self.ticker and self.selected_date)
-        mt.add_cmd("voi", "Tradier/YFinance", self.ticker and self.selected_date)
-        mt.add_cmd("hist", "Tradier", self.ticker and self.selected_date)
-        mt.add_cmd("vsurf", "Yfinance", self.ticker and self.selected_date)
-        mt.add_cmd("grhist", "Syncretism", self.ticker and self.selected_date)
-        mt.add_cmd("plot", "Yfinance", self.ticker and self.selected_date)
-        mt.add_cmd("parity", "Yfinance", self.ticker and self.selected_date)
-        mt.add_cmd("binom", "Yfinance", self.ticker and self.selected_date)
-        mt.add_cmd("greeks", "Yfinance", self.ticker and self.selected_date)
+        mt.add_cmd("pcr", self.ticker and self.selected_date)
+        mt.add_cmd("info", self.ticker and self.selected_date)
+        mt.add_cmd("chains", self.ticker and self.selected_date)
+        mt.add_cmd("oi", self.ticker and self.selected_date)
+        mt.add_cmd("vol", self.ticker and self.selected_date)
+        mt.add_cmd("voi", self.ticker and self.selected_date)
+        mt.add_cmd("hist", self.ticker and self.selected_date)
+        mt.add_cmd("vsurf", self.ticker and self.selected_date)
+        mt.add_cmd("grhist", self.ticker and self.selected_date)
+        mt.add_cmd("plot", self.ticker and self.selected_date)
+        mt.add_cmd("parity", self.ticker and self.selected_date)
+        mt.add_cmd("binom", self.ticker and self.selected_date)
+        mt.add_cmd("greeks", self.ticker and self.selected_date)
         mt.add_raw("\n")
         mt.add_menu("pricing", self.ticker and self.selected_date)
         mt.add_menu("hedge", self.ticker and self.selected_date)
@@ -305,12 +350,16 @@ class OptionsController(BaseController):
             help="Column to sort by.  Vol/OI is the default and typical variable to be considered unusual.",
         )
         parser.add_argument(
-            "-a",
-            "--ascending",
-            dest="ascend",
-            default=False,
+            "-r",
+            "--reverse",
             action="store_true",
-            help="Flag to sort in ascending order",
+            dest="reverse",
+            default=False,
+            help=(
+                "Data is sorted in descending order by default. "
+                "Reverse flag will sort it in an ascending way. "
+                "Only works when raw data is displayed."
+            ),
         )
         parser.add_argument(
             "-p",
@@ -340,10 +389,10 @@ class OptionsController(BaseController):
                 )
             else:
                 fdscanner_view.display_options(
-                    num=ns_parser.limit,
-                    sort_column=ns_parser.sortby,
+                    limit=ns_parser.limit,
+                    sortby=ns_parser.sortby,
                     export=ns_parser.export,
-                    ascending=ns_parser.ascend,
+                    ascend=ns_parser.reverse,
                     calls_only=ns_parser.calls_only,
                     puts_only=ns_parser.puts_only,
                 )
@@ -358,7 +407,7 @@ class OptionsController(BaseController):
         )
         parser.add_argument(
             "-l",
-            "-length",
+            "--length",
             help="Window length to get",
             dest="length",
             choices=self.pcr_length_choices,
@@ -380,7 +429,7 @@ class OptionsController(BaseController):
         if ns_parser:
             if self.ticker:
                 alphaquery_view.display_put_call_ratio(
-                    ticker=self.ticker,
+                    symbol=self.ticker,
                     window=ns_parser.length,
                     start_date=ns_parser.start.strftime("%Y-%m-%d"),
                     export=ns_parser.export,
@@ -403,7 +452,7 @@ class OptionsController(BaseController):
         if ns_parser:
             if self.ticker:
                 barchart_view.print_options_data(
-                    ticker=self.ticker, export=ns_parser.export
+                    symbol=self.ticker, export=ns_parser.export
                 )
             else:
                 console.print("No ticker loaded.\n")
@@ -463,6 +512,7 @@ class OptionsController(BaseController):
             "--limit",
             dest="limit",
             default=20,
+            type=int,
             help="Limit of raw data rows to display",
         )
         if other_args and "-" not in other_args[0][0]:
@@ -486,14 +536,14 @@ class OptionsController(BaseController):
                         )
                     ):
                         syncretism_view.view_historical_greeks(
-                            ticker=self.ticker,
+                            symbol=self.ticker,
                             expiry=self.selected_date,
                             strike=ns_parser.strike,
                             greek=ns_parser.greek,
                             chain_id=ns_parser.chain_id,
                             put=ns_parser.put,
                             raw=ns_parser.raw,
-                            n_show=ns_parser.limit,
+                            limit=ns_parser.limit,
                             export=ns_parser.export,
                         )
                     else:
@@ -523,22 +573,31 @@ class OptionsController(BaseController):
         if other_args and "-" not in other_args[0][0]:
             other_args.insert(0, "-t")
         ns_parser = self.parse_known_args_and_warn(
-            parser, other_args, sources=["tradier", "yf"]
+            parser,
+            other_args,
         )
         if ns_parser:
             self.ticker = ns_parser.ticker.upper()
             self.update_runtime_choices()
 
-            if ns_parser.source == "yf":
+            self.source = ns_parser.source
+            if ns_parser.source == "YahooFinance":
                 self.expiry_dates = yfinance_model.option_expirations(self.ticker)
+            elif ns_parser.source == "Nasdaq":
+                self.expiry_dates = nasdaq_model.get_expirations(self.ticker)
             else:
                 self.expiry_dates = tradier_model.option_expirations(self.ticker)
-            console.print("")
 
             if self.ticker and self.selected_date:
-                self.chain = yfinance_model.get_option_chain(
-                    self.ticker, self.selected_date
-                )
+                try:
+                    self.chain = yfinance_model.get_option_chain(
+                        self.ticker, self.selected_date
+                    )
+                except ValueError:
+                    console.print(
+                        f"[red]{self.ticker} does not have expiration"
+                        f" {self.selected_date}.[/red]"
+                    )
 
     @log_start_end(log=logger)
     def call_exp(self, other_args: List[str]):
@@ -570,14 +629,18 @@ class OptionsController(BaseController):
         )
 
         if other_args and "-" not in other_args[0][0]:
-            other_args.insert(0, "-i")
+            first_int = int(other_args[0].split("-")[0])
+            if first_int > 2000:
+                other_args.insert(0, "-d")
+            else:
+                other_args.insert(0, "-i")
+
         ns_parser = self.parse_known_args_and_warn(parser, other_args)
         if ns_parser:
             if self.ticker:
                 # Print possible expiry dates
                 if ns_parser.index == -1 and not ns_parser.date:
                     tradier_view.display_expiry_dates(self.expiry_dates)
-                    console.print("")
                 elif ns_parser.date:
                     if ns_parser.date in self.expiry_dates:
                         console.print(f"Expiration set to {ns_parser.date} \n")
@@ -592,9 +655,20 @@ class OptionsController(BaseController):
                     self.update_runtime_choices()
 
                 if self.selected_date:
-                    self.chain = yfinance_model.get_option_chain(
-                        self.ticker, self.selected_date
-                    )
+                    if self.source == "Tradier":
+                        df = tradier_model.get_option_chains(
+                            self.ticker, self.selected_date
+                        )
+                        self.chain = op_helpers.Chain(df)
+                    elif self.source == "Nasdaq":
+                        df = nasdaq_model.get_chain_given_expiration(
+                            self.ticker, self.selected_date
+                        )
+                        self.chain = op_helpers.Chain(df, self.source)
+                    else:
+                        self.chain = yfinance_model.get_option_chain(
+                            self.ticker, self.selected_date
+                        )
                     self.update_runtime_choices()
             else:
                 console.print("Please load a ticker using `load <ticker>`.\n")
@@ -637,52 +711,52 @@ class OptionsController(BaseController):
             EXPORT_BOTH_RAW_DATA_AND_FIGURES,
             raw=True,
             limit=10,
-            sources=["chartexchange", "tradier"],
         )
         if ns_parser:
-            if self.ticker:
-                if self.selected_date:
-                    if self.chain and (
-                        (
-                            ns_parser.put
-                            and ns_parser.strike
-                            in [float(strike) for strike in self.chain.puts["strike"]]
-                        )
-                        or (
-                            not ns_parser.put
-                            and ns_parser.strike
-                            in [float(strike) for strike in self.chain.calls["strike"]]
-                        )
-                    ):
-                        if ns_parser.source == "chartexchange":
-                            chartexchange_view.display_raw(
-                                self.ticker,
-                                self.selected_date,
-                                not ns_parser.put,
-                                ns_parser.strike,
-                                ns_parser.limit,
-                                ns_parser.export,
-                            )
-
-                        else:
-                            if TRADIER_TOKEN != "REPLACE_ME":  # nosec
-                                tradier_view.display_historical(
-                                    ticker=self.ticker,
-                                    expiry=self.selected_date,
-                                    strike=ns_parser.strike,
-                                    put=ns_parser.put,
-                                    raw=ns_parser.raw,
-                                    chain_id=ns_parser.chain_id,
-                                    export=ns_parser.export,
-                                )
-                            else:
-                                console.print("TRADIER TOKEN not supplied. \n")
-                    else:
-                        console.print("No correct strike input\n")
-                else:
-                    console.print("No expiry loaded. First use `exp <expiry date>` \n")
-            else:
+            if not self.ticker:
                 console.print("No ticker loaded. First use `load <ticker>`\n")
+                return
+            if not self.selected_date:
+                console.print("No expiry loaded. First use `exp <expiry date>` \n")
+                return
+            if self.chain and (
+                (
+                    ns_parser.put
+                    and ns_parser.strike
+                    not in [float(strike) for strike in self.chain.puts["strike"]]
+                )
+                or (
+                    not ns_parser.put
+                    and ns_parser.strike
+                    not in [float(strike) for strike in self.chain.calls["strike"]]
+                )
+            ):
+                console.print("No correct strike input\n")
+                return
+            if ns_parser.source == "ChartExchange":
+                chartexchange_view.display_raw(
+                    self.ticker,
+                    self.selected_date,
+                    not ns_parser.put,
+                    ns_parser.strike,
+                    ns_parser.limit,
+                    ns_parser.export,
+                )
+
+            elif (
+                ns_parser.source == "Tradier" and API_TRADIER_TOKEN != "REPLACE_ME"
+            ):  # nosec
+                tradier_view.display_historical(
+                    symbol=self.ticker,
+                    expiry=self.selected_date,
+                    strike=ns_parser.strike,
+                    put=ns_parser.put,
+                    raw=ns_parser.raw,
+                    chain_id=ns_parser.chain_id,
+                    export=ns_parser.export,
+                )
+            else:
+                console.print("TRADIER TOKEN not supplied. \n")
 
     @log_start_end(log=logger)
     def call_chains(self, other_args: List[str]):
@@ -731,8 +805,8 @@ class OptionsController(BaseController):
             dest="to_display",
             default=tradier_model.default_columns,
             type=tradier_view.check_valid_option_chains_headers,
-            help="Columns to look at.  Columns can be: bid, ask, strike, bidsize, asksize, volume, open_interest, "
-            "delta, gamma, theta, vega, ask_iv, bid_iv, mid_iv. E.g. 'bid,ask,strike' ",
+            help="(tradier only) Columns to look at.  Columns can be: bid, ask, strike, bidsize, asksize, "
+            "volume, open_interest, delta, gamma, theta, vega, ask_iv, bid_iv, mid_iv. E.g. 'bid,ask,strike' ",
         )
         ns_parser = self.parse_known_args_and_warn(
             parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
@@ -740,19 +814,36 @@ class OptionsController(BaseController):
         if ns_parser:
             if self.ticker:
                 if self.selected_date:
-                    if TRADIER_TOKEN != "REPLACE_ME":  # nosec
-                        tradier_view.display_chains(
-                            ticker=self.ticker,
+                    if ns_parser.source == "Tradier" or self.source == "Tradier":
+                        if API_TRADIER_TOKEN != "REPLACE_ME":  # nosec
+                            tradier_view.display_chains(
+                                symbol=self.ticker,
+                                expiry=self.selected_date,
+                                to_display=ns_parser.to_display,
+                                min_sp=ns_parser.min_sp,
+                                max_sp=ns_parser.max_sp,
+                                calls_only=ns_parser.calls,
+                                puts_only=ns_parser.puts,
+                                export=ns_parser.export,
+                            )
+                        else:
+                            console.print("TRADIER TOKEN not supplied. \n")
+                    elif ns_parser.source == "YahooFinance":
+                        yfinance_view.display_chains(
+                            symbol=self.ticker,
                             expiry=self.selected_date,
-                            to_display=ns_parser.to_display,
                             min_sp=ns_parser.min_sp,
                             max_sp=ns_parser.max_sp,
                             calls_only=ns_parser.calls,
                             puts_only=ns_parser.puts,
                             export=ns_parser.export,
                         )
-                    else:
-                        console.print("TRADIER TOKEN not supplied. \n")
+                    elif ns_parser.source == "Nasdaq":
+                        nasdaq_view.display_chains(
+                            symbol=self.ticker,
+                            expiry=self.selected_date,
+                            export=ns_parser.export,
+                        )
                 else:
                     console.print("No expiry loaded. First use `exp {expiry date}`\n")
             else:
@@ -802,35 +893,46 @@ class OptionsController(BaseController):
         ns_parser = self.parse_known_args_and_warn(
             parser,
             other_args,
-            EXPORT_BOTH_RAW_DATA_AND_FIGURES,
-            sources=["tradier", "yf"],
+            export_allowed=EXPORT_BOTH_RAW_DATA_AND_FIGURES,
+            raw=True,
         )
         if ns_parser:
             if self.ticker:
                 if self.selected_date:
                     if (
-                        ns_parser.source == "tradier"
-                        and TRADIER_TOKEN != "REPLACE_ME"  # nosec
-                    ):
+                        ns_parser.source == "Tradier"
+                        and API_TRADIER_TOKEN != "REPLACE_ME"  # nosec
+                    ) or self.source == "Tradier":
                         tradier_view.plot_vol(
-                            ticker=self.ticker,
+                            symbol=self.ticker,
                             expiry=self.selected_date,
                             min_sp=ns_parser.min,
                             max_sp=ns_parser.max,
                             calls_only=ns_parser.calls,
                             puts_only=ns_parser.puts,
                             export=ns_parser.export,
+                        )
+                    elif ns_parser.source == "YahooFinance":
+                        yfinance_view.plot_vol(
+                            symbol=self.ticker,
+                            expiry=self.selected_date,
+                            min_sp=ns_parser.min,
+                            max_sp=ns_parser.max,
+                            calls_only=ns_parser.calls,
+                            puts_only=ns_parser.puts,
+                            export=ns_parser.export,
+                        )
+                    elif ns_parser.source == "Nasdaq":
+                        nasdaq_view.display_volume(
+                            symbol=self.ticker,
+                            expiry=self.selected_date,
+                            min_sp=ns_parser.min,
+                            max_sp=ns_parser.max,
+                            export=ns_parser.export,
+                            raw=ns_parser.raw,
                         )
                     else:
-                        yfinance_view.plot_vol(
-                            ticker=self.ticker,
-                            expiry=self.selected_date,
-                            min_sp=ns_parser.min,
-                            max_sp=ns_parser.max,
-                            calls_only=ns_parser.calls,
-                            puts_only=ns_parser.puts,
-                            export=ns_parser.export,
-                        )
+                        return
                 else:
                     console.print("No expiry loaded. First use `exp {expiry date}`\n")
             else:
@@ -870,35 +972,43 @@ class OptionsController(BaseController):
             help="maximum strike price to consider in the plot.",
         )
         ns_parser = self.parse_known_args_and_warn(
-            parser,
-            other_args,
-            EXPORT_BOTH_RAW_DATA_AND_FIGURES,
-            sources=["tradier", "yf"],
+            parser, other_args, EXPORT_BOTH_RAW_DATA_AND_FIGURES, raw=True
         )
         if ns_parser:
             if self.ticker:
                 if self.selected_date:
                     if (
-                        ns_parser.source == "tradier"
-                        and TRADIER_TOKEN != "REPLACE_ME"  # nosec
-                    ):
+                        ns_parser.source == "Tradier"
+                        and API_TRADIER_TOKEN != "REPLACE_ME"  # nosec
+                    ) or self.source == "Tradier":
                         tradier_view.plot_volume_open_interest(
-                            ticker=self.ticker,
+                            symbol=self.ticker,
                             expiry=self.selected_date,
                             min_sp=ns_parser.min_sp,
                             max_sp=ns_parser.max_sp,
                             min_vol=ns_parser.min_vol,
+                            export=ns_parser.export,
+                        )
+                    elif ns_parser.source == "YahooFinance":
+                        yfinance_view.plot_volume_open_interest(
+                            symbol=self.ticker,
+                            expiry=self.selected_date,
+                            min_sp=ns_parser.min_sp,
+                            max_sp=ns_parser.max_sp,
+                            min_vol=ns_parser.min_vol,
+                            export=ns_parser.export,
+                        )
+                    elif ns_parser.source == "Nasdaq":
+                        nasdaq_view.display_volume_and_oi(
+                            symbol=self.ticker,
+                            expiry=self.selected_date,
+                            min_sp=ns_parser.min_sp,
+                            max_sp=ns_parser.max_sp,
+                            raw=ns_parser.raw,
                             export=ns_parser.export,
                         )
                     else:
-                        yfinance_view.plot_volume_open_interest(
-                            ticker=self.ticker,
-                            expiry=self.selected_date,
-                            min_sp=ns_parser.min_sp,
-                            max_sp=ns_parser.max_sp,
-                            min_vol=ns_parser.min_vol,
-                            export=ns_parser.export,
-                        )
+                        pass
                 else:
                     console.print("No expiry loaded. First use `exp {expiry date}`\n")
             else:
@@ -911,7 +1021,8 @@ class OptionsController(BaseController):
             add_help=False,
             formatter_class=argparse.ArgumentDefaultsHelpFormatter,
             prog="oi",
-            description="Plot open interest.  Open interest represents the number of contracts that exist.",
+            description="""Plot open interest. Open interest represents the number of
+            contracts that exist.""",
         )
         parser.add_argument(
             "-m",
@@ -948,18 +1059,18 @@ class OptionsController(BaseController):
         ns_parser = self.parse_known_args_and_warn(
             parser,
             other_args,
-            EXPORT_BOTH_RAW_DATA_AND_FIGURES,
-            sources=["tradier", "yf"],
+            raw=True,
+            export_allowed=EXPORT_BOTH_RAW_DATA_AND_FIGURES,
         )
         if ns_parser:
             if self.ticker:
                 if self.selected_date:
                     if (
-                        ns_parser.source == "tradier"
-                        and TRADIER_TOKEN != "REPLACE_ME"  # nosec
-                    ):
+                        ns_parser.source == "Tradier"
+                        and API_TRADIER_TOKEN != "REPLACE_ME"  # nosec
+                    ) or self.source == "Tradier":
                         tradier_view.plot_oi(
-                            ticker=self.ticker,
+                            symbol=self.ticker,
                             expiry=self.selected_date,
                             min_sp=ns_parser.min,
                             max_sp=ns_parser.max,
@@ -967,15 +1078,24 @@ class OptionsController(BaseController):
                             puts_only=ns_parser.puts,
                             export=ns_parser.export,
                         )
-                    else:
+                    elif ns_parser.source == "YahooFinance":
                         yfinance_view.plot_oi(
-                            ticker=self.ticker,
+                            symbol=self.ticker,
                             expiry=self.selected_date,
                             min_sp=ns_parser.min,
                             max_sp=ns_parser.max,
                             calls_only=ns_parser.calls,
                             puts_only=ns_parser.puts,
                             export=ns_parser.export,
+                        )
+                    elif ns_parser.source == "Nasdaq":
+                        nasdaq_view.display_oi(
+                            self.ticker,
+                            expiry=self.selected_date,
+                            min_sp=ns_parser.min,
+                            max_sp=ns_parser.max,
+                            export=ns_parser.export,
+                            raw=ns_parser.raw,
                         )
                 else:
                     console.print("No expiry loaded. First use `exp {expiry date}`\n")
@@ -1004,7 +1124,7 @@ class OptionsController(BaseController):
             "--x_axis",
             type=str,
             dest="x",
-            default=None,
+            default="s",
             choices=self.plot_vars_choices,
             help=(
                 "ltd- last trade date, s- strike, lp- last price, b- bid, a- ask,"
@@ -1016,7 +1136,7 @@ class OptionsController(BaseController):
             "--y_axis",
             type=str,
             dest="y",
-            default=None,
+            default="iv",
             choices=self.plot_vars_choices,
             help=(
                 "ltd- last trade date, s- strike, lp- last price, b- bid, a- ask,"
@@ -1047,13 +1167,13 @@ class OptionsController(BaseController):
                         )
                     else:
                         yfinance_view.plot_plot(
-                            self.ticker,
-                            self.selected_date,
-                            ns_parser.put,
-                            ns_parser.x,
-                            ns_parser.y,
-                            ns_parser.custom,
-                            ns_parser.export,
+                            symbol=self.ticker,
+                            expiry=self.selected_date,
+                            put=ns_parser.put,
+                            x=ns_parser.x,
+                            y=ns_parser.y,
+                            custom=ns_parser.custom,
+                            export=ns_parser.export,
                         )
                 else:
                     console.print("No expiry loaded. First use `exp {expiry date}`\n")
@@ -1062,7 +1182,7 @@ class OptionsController(BaseController):
 
     @log_start_end(log=logger)
     def call_vsurf(self, other_args: List[str]):
-        """Process vol command"""
+        """Process vsurf command"""
         parser = argparse.ArgumentParser(
             add_help=False,
             formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -1137,7 +1257,8 @@ class OptionsController(BaseController):
             help="Maximum strike price to show.",
         )
         parser.add_argument(
-            "-a" "--all",
+            "-a",
+            "--all",
             dest="all",
             action="store_true",
             default=False,
@@ -1155,9 +1276,9 @@ class OptionsController(BaseController):
             else:
                 opt_type = -1 if ns_parser.put else 1
                 yfinance_view.show_greeks(
-                    ticker=self.ticker,
+                    symbol=self.ticker,
                     div_cont=ns_parser.dividend,
-                    expire=self.selected_date,
+                    expiry=self.selected_date,
                     rf=ns_parser.risk_free,
                     opt_type=opt_type,
                     mini=ns_parser.min,

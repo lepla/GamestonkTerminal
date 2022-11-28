@@ -16,7 +16,7 @@ from openbb_terminal.cryptocurrency.onchain import onchain_controller
 @pytest.mark.parametrize(
     "queue, expected",
     [
-        (["load", "help"], []),
+        (["load", "help"], ["help"]),
         (["quit", "help"], ["help"]),
     ],
 )
@@ -66,7 +66,7 @@ def test_menu_without_queue_completion(mocker):
 
     result_menu = onchain_controller.OnchainController(queue=None).menu()
 
-    assert result_menu == []
+    assert result_menu == ["help"]
 
 
 @pytest.mark.vcr(record_mode="none")
@@ -110,7 +110,7 @@ def test_menu_without_queue_sys_exit(mock_input, mocker):
 
     result_menu = onchain_controller.OnchainController(queue=None).menu()
 
-    assert result_menu == []
+    assert result_menu == ["help"]
 
 
 @pytest.mark.vcr(record_mode="none")
@@ -328,6 +328,27 @@ def test_call_func_expect_queue(expected_queue, func, queue):
             "call_ttcp",
             ["Balancer"],
             "bitquery_view.display_most_traded_pairs",
+            [],
+            dict(),
+        ),
+        (
+            "call_dt",
+            [],
+            "shroom_view.display_daily_transactions",
+            [],
+            dict(),
+        ),
+        (
+            "call_ds",
+            ["uniswap-v3"],
+            "shroom_view.display_dapp_stats",
+            [],
+            dict(),
+        ),
+        (
+            "call_tvl",
+            ["0xa5407eae9ba41422680e2e00537571bcc53efbfd"],
+            "shroom_view.display_total_value_locked",
             [],
             dict(),
         ),

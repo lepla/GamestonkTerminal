@@ -5,7 +5,7 @@ import argparse
 import logging
 from typing import List
 
-from prompt_toolkit.completion import NestedCompleter
+from openbb_terminal.custom_prompt_toolkit import NestedCompleter
 
 from openbb_terminal import feature_flags as obbff
 from openbb_terminal.alternative.oss import github_view
@@ -14,8 +14,8 @@ from openbb_terminal.decorators import log_start_end
 from openbb_terminal.helper_funcs import (
     EXPORT_BOTH_RAW_DATA_AND_FIGURES,
     EXPORT_ONLY_RAW_DATA_ALLOWED,
-    log_and_raise,
     valid_repo,
+    parse_and_split_input,
 )
 from openbb_terminal.menu import session
 from openbb_terminal.parent_classes import BaseController
@@ -29,25 +29,40 @@ class OSSController(BaseController):
 
     CHOICES_COMMANDS = ["sh", "tr", "rs", "rossidx"]
     PATH = "/alternative/oss/"
+    CHOICES_GENERATION = True
 
     def __init__(self, queue: List[str] = None):
         """Constructor"""
         super().__init__(queue)
 
         if session and obbff.USE_PROMPT_TOOLKIT:
-            choices: dict = {c: {} for c in self.controller_choices}
-            choices["tr"]["-s"] = {c: None for c in ["stars", "forks"]}
-            choices["rossidx"]["-s"] = {c: None for c in runa_model.SORT_COLUMNS}
-            choices["rossidx"]["-t"] = {c: None for c in ["stars", "forks"]}
+            choices: dict = self.choices_default
+
             self.completer = NestedCompleter.from_nested_dict(choices)
+
+    def parse_input(self, an_input: str) -> List:
+        """Parse controller input
+
+        Overrides the parent class function to handle github org/repo path convention.
+        See `BaseController.parse_input()` for details.
+        """
+        # Covering the github "org/repo" convention in rs and sh commands
+        custom_filters = [
+            r"(sh .*?(\/[a-zA-Z0-9_\-\/]).*?((?=\/)|(?= )|(?=$)))",
+            r"(rs .*?(\/[a-zA-Z0-9_\-\/]).*?((?=\/)|(?= )|(?=$)))",
+        ]
+        commands = parse_and_split_input(
+            an_input=an_input, custom_filters=custom_filters
+        )
+        return commands
 
     def print_help(self):
         """Print help"""
         mt = MenuText("alternative/oss/", 80)
-        mt.add_cmd("rossidx", "Runa")
-        mt.add_cmd("rs", "GitHub")
-        mt.add_cmd("sh", "GitHub")
-        mt.add_cmd("tr", "GitHub")
+        mt.add_cmd("rossidx")
+        mt.add_cmd("rs")
+        mt.add_cmd("sh")
+        mt.add_cmd("tr")
         console.print(text=mt.menu_text, menu="Alternative - Open Source")
 
     @log_start_end(log=logger)
@@ -76,16 +91,10 @@ class OSSController(BaseController):
             raw=True,
         )
         if ns_parser:
-            if len(self.queue) == 0:
-                log_and_raise(
-                    argparse.ArgumentTypeError(
-                        f"{ns_parser.repo} is not a valid repo. Valid repo: org/repo"
-                    )
+            if valid_repo(ns_parser.repo):
+                github_view.display_star_history(
+                    repo=ns_parser.repo, export=ns_parser.export
                 )
-            repo = ns_parser.repo + "/" + self.queue[0]
-            if valid_repo(repo):
-                github_view.display_star_history(repo=repo, export=ns_parser.export)
-                self.queue = self.queue[1:]
 
     @log_start_end(log=logger)
     def call_rs(self, other_args: List[str]):
@@ -110,16 +119,10 @@ class OSSController(BaseController):
             parser, other_args, export_allowed=EXPORT_ONLY_RAW_DATA_ALLOWED, raw=True
         )
         if ns_parser:
-            if len(self.queue) == 0:
-                log_and_raise(
-                    argparse.ArgumentTypeError(
-                        f"{ns_parser.repo} is not a valid repo. Valid repo: org/repo"
-                    )
+            if valid_repo(ns_parser.repo):
+                github_view.display_repo_summary(
+                    repo=ns_parser.repo, export=ns_parser.export
                 )
-            repo = ns_parser.repo + "/" + self.queue[0]
-            if valid_repo(repo):
-                github_view.display_repo_summary(repo=repo, export=ns_parser.export)
-                self.queue = self.queue[1:]
 
     @log_start_end(log=logger)
     def call_rossidx(self, other_args: List[str]):
@@ -141,16 +144,21 @@ class OSSController(BaseController):
             nargs="+",
             help="Sort startups by column",
             default="Stars AGR [%]",
+            choices=runa_model.SORT_COLUMNS,
+            metavar="SORTBY",
         )
-
         parser.add_argument(
-            "--descend",
+            "-r",
+            "--reverse",
             action="store_true",
-            help="Flag to sort in descending order (lowest first)",
-            dest="descend",
+            dest="reverse",
             default=False,
+            help=(
+                "Data is sorted in descending order by default. "
+                "Reverse flag will sort it in an ascending way. "
+                "Only works when raw data is displayed."
+            ),
         )
-
         parser.add_argument(
             "-c",
             "--chart",
@@ -176,7 +184,6 @@ class OSSController(BaseController):
             default="stars",
             choices=["stars", "forks"],
         )
-
         ns_parser = self.parse_known_args_and_warn(
             parser,
             other_args,
@@ -187,8 +194,8 @@ class OSSController(BaseController):
         if ns_parser:
             runa_view.display_rossindex(
                 sortby=" ".join(ns_parser.sortby),
-                descend=ns_parser.descend,
-                top=ns_parser.limit,
+                ascend=ns_parser.reverse,
+                limit=ns_parser.limit,
                 show_chart=ns_parser.show_chart,
                 show_growth=ns_parser.show_growth,
                 chart_type=ns_parser.chart_type,

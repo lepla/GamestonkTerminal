@@ -18,29 +18,30 @@ from openbb_terminal.helper_funcs import (
     reindex_dates,
     is_valid_axes_count,
 )
+from openbb_terminal.common.technical_analysis import ta_helpers
 
 logger = logging.getLogger(__name__)
 
 
 @log_start_end(log=logger)
 def display_bbands(
-    ohlc: pd.DataFrame,
-    ticker: str = "",
-    length: int = 15,
+    data: pd.DataFrame,
+    symbol: str = "",
+    window: int = 15,
     n_std: float = 2,
     mamode: str = "sma",
     export: str = "",
     external_axes: Optional[List[plt.Axes]] = None,
 ):
-    """Show bollinger bands
+    """Plots bollinger bands
 
     Parameters
     ----------
-    ohlc : pd.DataFrame
-        Dataframe of stock prices
-    ticker : str
-        Ticker
-    length : int
+    data : pd.DataFrame
+        Dataframe of ohlc prices
+    symbol : str
+        Ticker symbol
+    window : int
         Length of window to calculate BB
     n_std : float
         Number of standard deviations to show
@@ -51,8 +52,8 @@ def display_bbands(
     external_axes : Optional[List[plt.Axes]], optional
         External axes (1 axis is expected in the list), by default None
     """
-    df_ta = volatility_model.bbands(ohlc["Adj Close"], length, n_std, mamode)
-    plot_data = pd.merge(ohlc, df_ta, how="outer", left_index=True, right_index=True)
+    df_ta = volatility_model.bbands(data, window, n_std, mamode)
+    plot_data = pd.merge(data, df_ta, how="outer", left_index=True, right_index=True)
     plot_data = reindex_dates(plot_data)
 
     # This plot has 1 axis
@@ -63,9 +64,12 @@ def display_bbands(
     else:
         return
 
+    close_col = ta_helpers.check_columns(data, high=False, low=False)
+    if close_col is None:
+        return
     ax.plot(
         plot_data.index,
-        plot_data["Adj Close"].values,
+        plot_data[close_col].values,
     )
     ax.plot(
         plot_data.index,
@@ -80,10 +84,10 @@ def display_bbands(
         theme.up_color,
         linewidth=0.7,
     )
-    ax.set_title(f"{ticker} Bollinger Bands")
+    ax.set_title(f"{symbol} Bollinger Bands")
     ax.set_xlim(plot_data.index[0], plot_data.index[-1])
     ax.set_ylabel("Share Price ($)")
-    ax.legend([ticker, df_ta.columns[0], df_ta.columns[1], df_ta.columns[2]])
+    ax.legend([symbol, df_ta.columns[0], df_ta.columns[1], df_ta.columns[2]])
     ax.fill_between(
         df_ta.index, df_ta.iloc[:, 0].values, df_ta.iloc[:, 2].values, alpha=0.1
     )
@@ -106,21 +110,21 @@ def display_bbands(
 
 @log_start_end(log=logger)
 def display_donchian(
-    ohlc: pd.DataFrame,
-    ticker: str = "",
+    data: pd.DataFrame,
+    symbol: str = "",
     upper_length: int = 20,
     lower_length: int = 20,
     export: str = "",
     external_axes: Optional[List[plt.Axes]] = None,
 ):
-    """Show donchian channels
+    """Plots donchian channels
 
     Parameters
     ----------
-    ohlc : pd.DataFrame
-        Dataframe of stock prices
-    ticker : str
-        Ticker
+    data : pd.DataFrame
+        Dataframe of ohlc prices
+    symbol : str
+        Ticker symbol
     upper_length : int
         Length of window to calculate upper channel
     lower_length : int
@@ -130,10 +134,8 @@ def display_donchian(
     external_axes : Optional[List[plt.Axes]], optional
         External axes (1 axis is expected in the list), by default None
     """
-    df_ta = volatility_model.donchian(
-        ohlc["High"], ohlc["Low"], upper_length, lower_length
-    )
-    plot_data = pd.merge(ohlc, df_ta, how="outer", left_index=True, right_index=True)
+    df_ta = volatility_model.donchian(data, upper_length, lower_length)
+    plot_data = pd.merge(data, df_ta, how="outer", left_index=True, right_index=True)
     plot_data = reindex_dates(plot_data)
 
     # This plot has 1 axis
@@ -144,7 +146,10 @@ def display_donchian(
     else:
         return
 
-    ax.plot(plot_data.index, plot_data["Adj Close"].values)
+    close_col = ta_helpers.check_columns(data)
+    if close_col is None:
+        return
+    ax.plot(plot_data.index, plot_data[close_col].values)
     ax.plot(
         plot_data.index,
         plot_data[df_ta.columns[0]].values,
@@ -164,10 +169,10 @@ def display_donchian(
         plot_data[df_ta.columns[2]].values,
         alpha=0.1,
     )
-    ax.set_title(f"{ticker} donchian")
+    ax.set_title(f"{symbol} donchian")
     ax.set_xlim(plot_data.index[0], plot_data.index[-1])
     ax.set_ylabel("Price ($)")
-    ax.legend([ticker, df_ta.columns[0], df_ta.columns[1], df_ta.columns[2]])
+    ax.legend([symbol, df_ta.columns[0], df_ta.columns[1], df_ta.columns[2]])
     theme.style_primary_axis(
         ax,
         data_index=plot_data.index.to_list(),
@@ -187,45 +192,45 @@ def display_donchian(
 
 @log_start_end(log=logger)
 def view_kc(
-    ohlc: pd.DataFrame,
-    length: int = 20,
+    data: pd.DataFrame,
+    window: int = 20,
     scalar: float = 2,
     mamode: str = "ema",
     offset: int = 0,
-    s_ticker: str = "",
+    symbol: str = "",
     export: str = "",
     external_axes: Optional[List[plt.Axes]] = None,
 ):
-    """View Keltner Channels Indicator
+    """Plots Keltner Channels Indicator
 
     Parameters
     ----------
 
-    ohlc : pd.DataFrame
-        Dataframe of stock prices
-    length : int
+    data: pd.DataFrame
+        Dataframe of ohlc prices
+    window: int
         Length of window
+    scalar: float
+        Scalar value
     mamode: str
         Type of filter
-    offset : int
+    offset: int
         Offset value
-    s_ticker : str
-        Ticker
-    export : str
+    symbol: str
+        Ticker symbol
+    export: str
         Format to export data
-    external_axes : Optional[List[plt.Axes]], optional
+    external_axes: Optional[List[plt.Axes]], optional
         External axes (2 axes are expected in the list), by default None
     """
     df_ta = volatility_model.kc(
-        ohlc["High"],
-        ohlc["Low"],
-        ohlc["Adj Close"],
-        length,
+        data,
+        window,
         scalar,
         mamode,
         offset,
     )
-    plot_data = pd.merge(ohlc, df_ta, how="outer", left_index=True, right_index=True)
+    plot_data = pd.merge(data, df_ta, how="outer", left_index=True, right_index=True)
     plot_data = reindex_dates(plot_data)
 
     # This plot has 1 axis
@@ -236,7 +241,10 @@ def view_kc(
     else:
         return
 
-    ax.plot(plot_data.index, plot_data["Adj Close"].values)
+    close_col = ta_helpers.check_columns(data)
+    if close_col is None:
+        return
+    ax.plot(plot_data.index, plot_data[close_col].values)
     ax.plot(
         plot_data.index,
         plot_data[df_ta.columns[0]].values,
@@ -256,10 +264,10 @@ def view_kc(
         plot_data[df_ta.columns[2]].values,
         alpha=0.1,
     )
-    ax.set_title(f"{s_ticker} Keltner Channels")
+    ax.set_title(f"{symbol} Keltner Channels")
     ax.set_xlim(plot_data.index[0], plot_data.index[-1])
     ax.set_ylabel("Price")
-    ax.legend([s_ticker, df_ta.columns[0], df_ta.columns[1], df_ta.columns[2]])
+    ax.legend([symbol, df_ta.columns[0], df_ta.columns[1], df_ta.columns[2]])
     theme.style_primary_axis(
         ax,
         data_index=plot_data.index.to_list(),
@@ -273,5 +281,77 @@ def view_kc(
         export,
         os.path.dirname(os.path.abspath(__file__)).replace("common", "stocks"),
         "kc",
+        df_ta,
+    )
+
+
+@log_start_end(log=logger)
+def display_atr(
+    data: pd.DataFrame,
+    symbol: str = "",
+    window: int = 14,
+    mamode: str = "sma",
+    offset: int = 0,
+    export: str = "",
+    external_axes: Optional[List[plt.Axes]] = None,
+):
+    """Plots ATR
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        Dataframe of ohlc prices
+    symbol : str
+        Ticker symbol
+    window : int
+        Length of window to calculate upper channel
+    export : str
+        Format of export file
+    external_axes : Optional[List[plt.Axes]], optional
+        External axes (1 axis is expected in the list), by default None
+    """
+    df_ta = volatility_model.atr(data, window=window, mamode=mamode, offset=offset)
+
+    # This plot has 2 axes
+    if external_axes is None:
+        _, axes = plt.subplots(
+            2, 1, figsize=plot_autoscale(), sharex=True, dpi=PLOT_DPI
+        )
+        (ax1, ax2) = axes
+    elif is_valid_axes_count(external_axes, 2):
+        (ax1, ax2) = external_axes
+    else:
+        return
+
+    plot_data = pd.merge(data, df_ta, how="outer", left_index=True, right_index=True)
+    plot_data = reindex_dates(plot_data)
+
+    ax1.plot(plot_data.index, plot_data.iloc[:, 1].values, color=theme.get_colors()[0])
+    ax1.set_title(f"{symbol} ATR")
+    ax1.set_xlim(plot_data.index[0], plot_data.index[-1])
+    ax1.set_ylabel("Share Price ($)")
+    theme.style_primary_axis(
+        ax=ax1,
+        data_index=plot_data.index.to_list(),
+        tick_labels=plot_data["date"].to_list(),
+    )
+
+    ax2.plot(
+        plot_data.index, plot_data[df_ta.columns[0]].values, color=theme.get_colors()[1]
+    )
+    ax2.set_xlim(plot_data.index[0], plot_data.index[-1])
+    ax2.set_ylabel("ATR")
+    theme.style_primary_axis(
+        ax=ax2,
+        data_index=plot_data.index.to_list(),
+        tick_labels=plot_data["date"].to_list(),
+    )
+    if external_axes is None:
+        theme.visualize_output()
+
+    export_data(
+        export,
+        os.path.dirname(os.path.abspath(__file__)).replace("common", "stocks"),
+        "atr",
         df_ta,
     )

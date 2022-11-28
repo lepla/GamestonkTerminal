@@ -18,38 +18,37 @@ from openbb_terminal.helper_funcs import (
     reindex_dates,
     is_valid_axes_count,
 )
-from openbb_terminal.rich_config import console
 
 logger = logging.getLogger(__name__)
 
 
 @log_start_end(log=logger)
 def display_mean_std(
-    name: str,
-    df: pd.DataFrame,
+    data: pd.DataFrame,
     target: str,
-    window: int,
+    symbol: str = "",
+    window: int = 14,
     export: str = "",
     external_axes: Optional[List[plt.Axes]] = None,
-):
-    """View rolling spread
+) -> None:
+    """Plots mean std deviation
 
     Parameters
     ----------
-    name : str
-        Stock ticker
-    df : pd.DataFrame
+    data: pd.DataFrame
         Dataframe
-    target : str
+    target: str
         Column in data to look at
+    symbol : str
+        Stock ticker
     window : int
         Length of window
-    export : str
+    export: str
         Format to export data
-    external_axes : Optional[List[plt.Axes]], optional
+    external_axes: Optional[List[plt.Axes]], optional
         External axes (2 axes are expected in the list), by default None
     """
-    data = df[target]
+    data = data[target]
     rolling_mean, rolling_std = rolling_model.get_rolling_avg(data, window)
     plot_data = pd.merge(
         data,
@@ -87,7 +86,7 @@ def display_mean_std(
     ax1.plot(
         plot_data.index,
         plot_data[target].values,
-        label=name,
+        label=symbol,
     )
     ax1.plot(
         plot_data.index,
@@ -97,7 +96,7 @@ def display_mean_std(
         "Values",
     )
     ax1.legend(["Real Values", "Rolling Mean"])
-    ax1.set_title(f"Rolling mean and std (window {str(window)}) of {name} {target}")
+    ax1.set_title(f"Rolling mean and std (window {str(window)}) of {symbol} {target}")
     ax1.set_xlim([plot_data.index[0], plot_data.index[-1]])
 
     ax2.plot(
@@ -134,31 +133,33 @@ def display_mean_std(
 
 @log_start_end(log=logger)
 def display_spread(
-    name: str,
-    df: pd.DataFrame,
+    data: pd.DataFrame,
     target: str,
-    window: int,
+    symbol: str = "",
+    window: int = 14,
     export: str = "",
     external_axes: Optional[List[plt.Axes]] = None,
 ):
-    """View rolling spread
+    """Plots rolling spread
 
     Parameters
     ----------
-    name : str
-        Stock ticker
-    df : pd.DataFrame
+    data: pd.DataFrame
         Dataframe
     target: str
         Column in data to look at
+    target: str
+        Column in data to look at
+    symbol : str
+        Stock ticker
     window : int
         Length of window
-    export : str
+    export: str
         Format to export data
-    external_axes : Optional[List[plt.Axes]], optional
+    external_axes: Optional[List[plt.Axes]], optional
         External axes (3 axes are expected in the list), by default None
     """
-    data = df[target]
+    data = data[target]
     df_sd, df_var = rolling_model.get_spread(data, window)
 
     plot_data = pd.merge(
@@ -197,7 +198,7 @@ def display_spread(
     ax1.plot(plot_data.index, plot_data[target].values)
     ax1.set_xlim(plot_data.index[0], plot_data.index[-1])
     ax1.set_ylabel("Value")
-    ax1.set_title(f"Spread of {name} {target}")
+    ax1.set_title(f"Spread of {symbol} {target}")
 
     ax2.plot(
         plot_data[f"STDEV_{window}"].index,
@@ -242,34 +243,34 @@ def display_spread(
 
 @log_start_end(log=logger)
 def display_quantile(
-    name: str,
-    df: pd.DataFrame,
+    data: pd.DataFrame,
     target: str,
-    window: int,
-    quantile: float,
+    symbol: str = "",
+    window: int = 14,
+    quantile: float = 0.5,
     export: str = "",
     external_axes: Optional[List[plt.Axes]] = None,
-):
-    """View rolling quantile
+) -> None:
+    """Plots rolling quantile
 
     Parameters
     ----------
-    name : str
-        Stock ticker
-    df : pd.DataFrame
+    data: pd.DataFrame
         Dataframe
-    target : str
+    target: str
         Column in data to look at
+    symbol : str
+        Stock ticker
     window : int
         Length of window
-    quantile : float
+    quantile: float
         Quantile to get
-    export : str
+    export: str
         Format to export data
-    external_axes : Optional[List[plt.Axes]], optional
+    external_axes: Optional[List[plt.Axes]], optional
         External axes (1 axis is expected in the list), by default None
     """
-    data = df[target]
+    data = data[target]
     df_med, df_quantile = rolling_model.get_quantile(data, window, quantile)
 
     plot_data = pd.merge(
@@ -301,7 +302,7 @@ def display_quantile(
     else:
         return
 
-    ax.set_title(f"{name} {target} Median & Quantile")
+    ax.set_title(f"{symbol} {target} Median & Quantile")
     ax.plot(plot_data.index, plot_data[target].values, label=target)
     ax.plot(
         plot_data.index,
@@ -316,7 +317,7 @@ def display_quantile(
     )
 
     ax.set_xlim(plot_data.index[0], plot_data.index[-1])
-    ax.set_ylabel(f"{name} Value")
+    ax.set_ylabel(f"{symbol} Value")
     ax.legend()
 
     theme.style_primary_axis(
@@ -338,31 +339,31 @@ def display_quantile(
 
 @log_start_end(log=logger)
 def display_skew(
-    name: str,
-    df: pd.DataFrame,
+    symbol: str,
+    data: pd.DataFrame,
     target: str,
-    window: int,
+    window: int = 14,
     export: str = "",
     external_axes: Optional[List[plt.Axes]] = None,
-):
-    """View rolling skew
+) -> None:
+    """Plots rolling skew
 
     Parameters
     ----------
-    name : str
+    symbol: str
         Stock ticker
-    df : pd.DataFrame
+    data: pd.DataFrame
         Dataframe
-    target : str
+    target: str
         Column in data to look at
-    window : int
+    window: int
         Length of window
-    export : str
+    export: str
         Format to export data
-    external_axes : Optional[List[plt.Axes]], optional
+    external_axes: Optional[List[plt.Axes]], optional
         External axes (2 axes are expected in the list), by default None
     """
-    data = df[target]
+    data = data[target]
     df_skew = rolling_model.get_skew(data, window)
 
     plot_data = pd.merge(
@@ -389,7 +390,7 @@ def display_skew(
     else:
         return
 
-    ax1.set_title(f"{name} Skewness Indicator")
+    ax1.set_title(f"{symbol} Skewness Indicator")
     ax1.plot(plot_data.index, plot_data[target].values)
     ax1.set_xlim(plot_data.index[0], plot_data.index[-1])
     ax1.set_ylabel(f"{target}")
@@ -411,7 +412,6 @@ def display_skew(
     if external_axes is None:
         theme.visualize_output()
 
-    console.print("")
     export_data(
         export,
         os.path.dirname(os.path.abspath(__file__)).replace("common", "stocks"),
@@ -422,29 +422,31 @@ def display_skew(
 
 @log_start_end(log=logger)
 def display_kurtosis(
-    name: str,
-    df: pd.DataFrame,
+    symbol: str,
+    data: pd.DataFrame,
     target: str,
-    window: int,
+    window: int = 14,
     export: str = "",
     external_axes: Optional[List[plt.Axes]] = None,
 ):
-    """View rolling kurtosis
+    """Plots rolling kurtosis
 
     Parameters
     ----------
-    name : str
+    symbol: str
         Ticker
-    df : pd.DataFrame
+    data: pd.DataFrame
         Dataframe of stock prices
-    window : int
+    target: str
+        Column in data to look at
+    window: int
         Length of window
-    export : str
+    export: str
         Format to export data
-    external_axes : Optional[List[plt.Axes]], optional
+    external_axes: Optional[List[plt.Axes]], optional
         External axes (2 axes are expected in the list), by default None
     """
-    data = df[target]
+    data = data[target]
     df_kurt = rolling_model.get_kurtosis(data, window)
 
     plot_data = pd.merge(
@@ -471,7 +473,7 @@ def display_kurtosis(
     else:
         return
 
-    ax1.set_title(f"{name} {target} Kurtosis Indicator (window {str(window)})")
+    ax1.set_title(f"{symbol} {target} Kurtosis Indicator (window {str(window)})")
     ax1.plot(plot_data.index, plot_data[target].values)
     ax1.set_xlim(plot_data.index[0], plot_data.index[-1])
     ax1.set_ylabel(f"{target}")
@@ -496,7 +498,6 @@ def display_kurtosis(
     if external_axes is None:
         theme.visualize_output()
 
-    console.print("")
     export_data(
         export,
         os.path.dirname(os.path.abspath(__file__)).replace("common", "stocks"),

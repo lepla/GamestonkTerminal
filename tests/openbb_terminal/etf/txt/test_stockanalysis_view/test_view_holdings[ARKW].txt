@@ -1,7 +1,7 @@
-     % Of Etf     Shares
-COIN    7.63%  1,052,066
-TSLA    7.22%    220,222
-GBTC    6.59%  6,803,551
-ZM      5.51%  1,069,741
-SPOT    5.36%    744,393
-
+                                   Name % Of Etf   Shares
+Symbol                                                   
+ZM      Zoom Video Communications, Inc.    8.24%  1216922
+TSLA                        Tesla, Inc.    8.16%   455122
+COIN              Coinbase Global, Inc.    7.53%  1245412
+ROKU                         Roku, Inc.    6.64%  1489131
+SQ                          Block, Inc.    6.07%  1263217

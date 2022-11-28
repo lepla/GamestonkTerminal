@@ -1,8 +1,10 @@
 """ Business Insider View """
 __docformat__ = "numpy"
 
+from datetime import datetime, timedelta
 import logging
 import os
+import math
 from typing import List, Optional
 
 import matplotlib.pyplot as plt
@@ -26,15 +28,17 @@ logger = logging.getLogger(__name__)
 
 register_matplotlib_converters()
 
+# pylint: disable=R0912
+
 
 @log_start_end(log=logger)
 def insider_activity(
-    stock: pd.DataFrame,
-    ticker: str,
-    start: str,
-    interval: str,
-    num: int,
-    raw: bool,
+    data: pd.DataFrame,
+    symbol: str,
+    start_date: Optional[str] = None,
+    interval: str = "1440min",
+    limit: int = 10,
+    raw: bool = False,
     export: str = "",
     external_axes: Optional[List[plt.Axes]] = None,
 ):
@@ -42,32 +46,36 @@ def insider_activity(
 
     Parameters
     ----------
-    stock : pd.DataFrame
+    data: pd.DataFrame
         Stock dataframe
-    ticker : str
+    symbol: str
         Due diligence ticker symbol
-    start : str
-        Start date of the stock data
-    interval : str
+    start_date: Optional[str]
+        Initial date (e.g., 2021-10-01). Defaults to 3 years back
+    interval: str
         Stock data interval
-    num : int
+    limit: int
         Number of latest days of inside activity
     raw: bool
         Print to console
-    export : str
+    export: str
         Export dataframe data to csv,json,xlsx file
-    external_axes : Optional[List[plt.Axes]], optional
+    external_axes: Optional[List[plt.Axes]], optional
         External axes (1 axis is expected in the list), by default None
     """
-    df_ins = businessinsider_model.get_insider_activity(ticker)
+
+    if start_date is None:
+        start_date = (datetime.now() - timedelta(days=1100)).strftime("%Y-%m-%d")
+
+    df_ins = businessinsider_model.get_insider_activity(symbol)
 
     if df_ins.empty:
         logger.warning("The insider activity on the ticker does not exist")
         console.print("[red]The insider activity on the ticker does not exist.\n[/red]")
     else:
 
-        if start:
-            df_insider = df_ins[start:].copy()  # type: ignore
+        if start_date:
+            df_insider = df_ins[start_date:].copy()  # type: ignore
         else:
             df_insider = df_ins.copy()
 
@@ -76,7 +84,7 @@ def insider_activity(
 
             print_rich_table(
                 df_insider.sort_index(ascending=False)
-                .head(n=num)
+                .head(n=limit)
                 .applymap(lambda x: x.replace(".00", "").replace(",", "")),
                 headers=list(df_insider.columns),
                 show_index=True,
@@ -92,11 +100,11 @@ def insider_activity(
                 return
 
             if interval == "1440min":
-                ax.plot(stock.index, stock["Adj Close"].values, lw=3)
+                ax.plot(data.index, data["Adj Close"].values, lw=3)
             else:  # Intraday
-                ax.plot(stock.index, stock["Close"].values, lw=3)
+                ax.plot(data.index, data["Close"].values, lw=3)
 
-            ax.set_title(f"{ticker.upper()}'s Insider Trading Activity & Share Price")
+            ax.set_title(f"{symbol.upper()}'s Insider Trading Activity & Share Price")
             ax.set_ylabel("Share Price")
 
             df_insider["Trade"] = df_insider.apply(
@@ -104,38 +112,50 @@ def insider_activity(
                 * float(row["Shares Traded"].replace(",", "")),
                 axis=1,
             )
-            ax.set_xlim(right=stock.index[-1])
+            ax.set_xlim(right=data.index[-1])
             min_price, max_price = ax.get_ylim()
 
             price_range = max_price - min_price
-            shares_range = (
+
+            maxshares = (
                 df_insider[df_insider["Type"] == "Buy"]
                 .groupby(by=["Date"])
-                .sum()["Trade"]
+                .sum(numeric_only=True)["Trade"]
                 .max()
-                - df_insider[df_insider["Type"] == "Sell"]
+            )
+            minshares = (
+                df_insider[df_insider["Type"] == "Sell"]
                 .groupby(by=["Date"])
-                .sum()["Trade"]
+                .sum(numeric_only=True)["Trade"]
                 .min()
             )
+
+            if math.isnan(maxshares):
+                shares_range = minshares
+            elif math.isnan(minshares):
+                shares_range = maxshares
+            else:
+                shares_range = maxshares - minshares
+
             n_proportion = price_range / shares_range
 
+            bar_1 = None
             for ind in (
                 df_insider[df_insider["Type"] == "Sell"]
                 .groupby(by=["Date"])
-                .sum()
+                .sum(numeric_only=True)
                 .index
             ):
-                if ind in stock.index:
+                if ind in data.index:
                     ind_dt = ind
                 else:
                     ind_dt = get_next_stock_market_days(ind, 1)[0]
 
                 n_stock_price = 0
                 if interval == "1440min":
-                    n_stock_price = stock["Adj Close"][ind_dt]
+                    n_stock_price = data["Adj Close"][ind_dt]
                 else:
-                    n_stock_price = stock["Close"][ind_dt]
+                    n_stock_price = data["Close"][ind_dt]
 
                 bar_1 = ax.vlines(
                     x=ind_dt,
@@ -144,7 +164,7 @@ def insider_activity(
                     * float(
                         df_insider[df_insider["Type"] == "Sell"]
                         .groupby(by=["Date"])
-                        .sum()["Trade"][ind]
+                        .sum(numeric_only=True)["Trade"][ind]
                     ),
                     ymax=n_stock_price,
                     colors=theme.down_color,
@@ -152,19 +172,23 @@ def insider_activity(
                     lw=5,
                 )
 
+            bar_2 = None
             for ind in (
-                df_insider[df_insider["Type"] == "Buy"].groupby(by=["Date"]).sum().index
+                df_insider[df_insider["Type"] == "Buy"]
+                .groupby(by=["Date"])
+                .sum(numeric_only=True)
+                .index
             ):
-                if ind in stock.index:
+                if ind in data.index:
                     ind_dt = ind
                 else:
                     ind_dt = get_next_stock_market_days(ind, 1)[0]
 
                 n_stock_price = 0
                 if interval == "1440min":
-                    n_stock_price = stock["Adj Close"][ind_dt]
+                    n_stock_price = data["Adj Close"][ind_dt]
                 else:
-                    n_stock_price = stock["Close"][ind_dt]
+                    n_stock_price = data["Close"][ind_dt]
 
                 bar_2 = ax.vlines(
                     x=ind_dt,
@@ -174,18 +198,31 @@ def insider_activity(
                     * float(
                         df_insider[df_insider["Type"] == "Buy"]
                         .groupby(by=["Date"])
-                        .sum()["Trade"][ind]
+                        .sum(numeric_only=True)["Trade"][ind]
                     ),
                     colors=theme.up_color,
                     ls="-",
                     lw=5,
                 )
 
-            ax.legend(
-                handles=[bar_1, bar_2],
-                labels=["Insider Selling", "Insider Buying"],
-                loc="best",
-            )
+            if bar_1 and bar_2:
+                ax.legend(
+                    handles=[bar_1, bar_2],
+                    labels=["Insider Selling", "Insider Buying"],
+                    loc="best",
+                )
+            elif bar_1:
+                ax.legend(
+                    handles=[bar_1],
+                    labels=["Insider Selling"],
+                    loc="best",
+                )
+            elif bar_2:
+                ax.legend(
+                    handles=[bar_2],
+                    labels=["Insider Buying"],
+                    loc="best",
+                )
             theme.style_primary_axis(ax)
 
             if not external_axes:

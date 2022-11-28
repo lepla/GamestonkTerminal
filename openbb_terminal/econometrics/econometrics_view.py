@@ -3,25 +3,20 @@ __docformat__ = "numpy"
 
 import logging
 import os
-from itertools import combinations
-from typing import Dict, Any, Optional, List
+from typing import Dict, List, Optional, Union
 
 import matplotlib.pyplot as plt
 import pandas as pd
+from matplotlib.units import ConversionError
 from pandas.plotting import register_matplotlib_converters
 
 from openbb_terminal.config_plot import PLOT_DPI
-from openbb_terminal.decorators import log_start_end
-from openbb_terminal.helper_funcs import (
-    export_data,
-    plot_autoscale,
-)
-from openbb_terminal.helper_funcs import (
-    print_rich_table,
-)
-from openbb_terminal.rich_config import console
-from openbb_terminal.econometrics import econometrics_model
 from openbb_terminal.config_terminal import theme
+from openbb_terminal.decorators import log_start_end
+from openbb_terminal.econometrics import econometrics_model
+from openbb_terminal.econometrics.econometrics_helpers import get_ending
+from openbb_terminal.helper_funcs import export_data, plot_autoscale, print_rich_table
+from openbb_terminal.rich_config import console
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +65,7 @@ def show_options(
 
 @log_start_end(log=logger)
 def display_plot(
-    data: Dict[str, pd.DataFrame],
+    data: Union[pd.Series, pd.DataFrame, Dict[str, pd.DataFrame]],
     export: str = "",
     external_axes: Optional[List[plt.axes]] = None,
 ):
@@ -78,13 +73,17 @@ def display_plot(
 
     Parameters
     ----------
-    data: Dict[str: pd.DataFrame]
+    data: Union[pd.Series, pd.DataFrame, Dict[str: pd.DataFrame]
         Dictionary with key being dataset.column and dataframes being values
     export: str
         Format to export image
     external_axes:Optional[List[plt.axes]]
         External axes to plot on
     """
+    if isinstance(data, pd.Series):
+        data = {data.name: data}
+    elif isinstance(data, pd.DataFrame):
+        data = {x: data[x] for x in data.columns}
 
     for dataset_col in data:
         if isinstance(data[dataset_col].index, pd.MultiIndex):
@@ -102,15 +101,20 @@ def display_plot(
             ax = external_axes[0]
 
         for dataset_col in data:
-            if isinstance(data[dataset_col], pd.Series):
-                ax.plot(data[dataset_col].index, data[dataset_col].values)
-            elif isinstance(data[dataset_col], pd.DataFrame):
-                ax.plot(data[dataset_col])
+            try:
+                if isinstance(data[dataset_col], pd.Series):
+                    ax.plot(data[dataset_col].index, data[dataset_col].values)
+                elif isinstance(data[dataset_col], pd.DataFrame):
+                    ax.plot(data[dataset_col])
 
-            theme.style_primary_axis(ax)
+            except ConversionError:
+                print(f"Could not convert column: {dataset_col}")
+            except TypeError:
+                print(f"Could not convert column: {dataset_col}")
 
-            if external_axes is None:
-                theme.visualize_output()
+        theme.style_primary_axis(ax)
+        if external_axes is None:
+            theme.visualize_output()
 
         ax.legend(list(data.keys()))
 
@@ -124,9 +128,9 @@ def display_plot(
 @log_start_end(log=logger)
 def display_norm(
     data: pd.Series,
-    dataset: str,
-    column: str,
-    plot: bool = False,
+    dataset: str = "",
+    column: str = "",
+    plot: bool = True,
     export: str = "",
     external_axes: Optional[List[plt.axes]] = None,
 ):
@@ -149,17 +153,18 @@ def display_norm(
     """
     if data.dtype not in [int, float]:
         console.print(
-            f"The column type must be numeric. The {column}-{dataset} type is {data.dtype}. "
+            f"The column type must be numeric. The provided column type is {data.dtype}. "
             f"Consider using the command 'type' to change this.\n"
         )
     else:
         results = econometrics_model.get_normality(data)
 
+        ending = get_ending(dataset, column)
         print_rich_table(
             results,
             headers=list(results.columns),
             show_index=True,
-            title=f"Normality test from dataset '{dataset}' of '{column}'",
+            title=f"Normality test{ending}",
         )
 
         if plot:
@@ -170,7 +175,7 @@ def display_norm(
 
             ax.hist(data, bins=100)
 
-            ax.set_title(f"Histogram from dataset '{dataset}' of '{column}'")
+            ax.set_title(f"Histogram{ending}")
 
             theme.style_primary_axis(ax)
 
@@ -190,57 +195,58 @@ def display_norm(
 
 @log_start_end(log=logger)
 def display_root(
-    df: pd.Series,
-    dataset_name: str,
-    column_name: str,
-    fuller_reg: str,
-    kpss_reg: str,
+    data: pd.Series,
+    dataset: str = "",
+    column: str = "",
+    fuller_reg: str = "c",
+    kpss_reg: str = "c",
     export: str = "",
 ):
     """Determine the normality of a timeseries.
 
     Parameters
     ----------
-    df : pd.Series
+    data : pd.Series
         Series of target variable
-    dataset_name: str
+    dataset: str
         Name of the dataset
-    column_name: str
+    column: str
         Name of the column
     fuller_reg : str
-        Type of regression of ADF test
+        Type of regression of ADF test. Choose c, ct, ctt, or nc
     kpss_reg : str
-        Type of regression for KPSS test
+        Type of regression for KPSS test. Choose c or ct
     export: str
         Format to export data.
     """
-    if df.dtype not in [int, float]:
+    if data.dtype not in [int, float]:
         console.print(
-            f"The column type must be numeric. The {column_name}-{dataset_name} "
-            f"type is {df.dtype}. Consider using the command 'type' to change this.\n"
+            f"The column type must be numeric. The provided "
+            f"type is {data.dtype}. Consider using the command 'type' to change this.\n"
         )
     else:
-        results = econometrics_model.get_root(df, fuller_reg, kpss_reg)
+        results = econometrics_model.get_root(data, fuller_reg, kpss_reg)
 
+        ending = get_ending(dataset, column)
         print_rich_table(
             results,
             headers=list(results.columns),
             show_index=True,
-            title=f"Unitroot from dataset '{dataset_name} of '{column_name}'",
+            title=f"Unitroot {ending}",
         )
 
         export_data(
             export,
             os.path.dirname(os.path.abspath(__file__)),
-            f"{dataset_name}_{column_name}_root",
+            f"{dataset}_{column}_root",
             results,
         )
 
 
 @log_start_end(log=logger)
 def display_granger(
-    time_series_y: pd.Series,
-    time_series_x: pd.Series,
+    dependent_series: pd.Series,
+    independent_series: pd.Series,
     lags: int = 3,
     confidence_level: float = 0.05,
     export: str = "",
@@ -249,10 +255,10 @@ def display_granger(
 
     Parameters
     ----------
-    time_series_y : Series
+    dependent_series: Series
         The series you want to test Granger Causality for.
-    time_series_x : Series
-        The series that you want to test whether it Granger-causes time_series_y
+    independent_series: Series
+        The series that you want to test whether it Granger-causes dependent_series
     lags : int
         The amount of lags for the Granger test. By default, this is set to 3.
     confidence_level: float
@@ -260,40 +266,29 @@ def display_granger(
     export : str
         Format to export data
     """
-    if time_series_y.dtype not in [int, float]:
+    if dependent_series.dtype not in [int, float]:
         console.print(
-            f"The time series {time_series_y.name} needs to be numeric but is type {time_series_y.dtype}. "
-            f"Consider using the command 'type' to change this."
+            f"The time series {dependent_series.name} needs to be numeric but is type "
+            f"{dependent_series.dtype}. Consider using the command 'type' to change this."
         )
-    elif time_series_x.dtype not in [int, float]:
+    elif independent_series.dtype not in [int, float]:
         console.print(
-            f"The time series {time_series_x.name} needs to be numeric but is type {time_series_x.dtype}. "
-            f"Consider using the command 'type' to change this."
+            f"The time series {independent_series.name} needs to be numeric but is type "
+            f"{independent_series.dtype}. Consider using the command 'type' to change this."
         )
     else:
-        granger = econometrics_model.get_granger_causality(
-            time_series_y, time_series_x, lags
+        granger_df = econometrics_model.get_granger_causality(
+            dependent_series, independent_series, lags
         )
-
-        for test in granger[lags][0]:
-            # As ssr_chi2test and lrtest have one less value in the tuple, we fill
-            # this value with a '-' to allow the conversion to a DataFrame
-            if len(granger[lags][0][test]) != 4:
-                pars = granger[lags][0][test]
-                granger[lags][0][test] = (pars[0], pars[1], "-", pars[2])
-
-        granger_df = pd.DataFrame(
-            granger[lags][0], index=["F-test", "P-value", "Count", "Lags"]
-        ).T
 
         print_rich_table(
             granger_df,
             headers=list(granger_df.columns),
             show_index=True,
-            title=f"Granger Causality Test [Y: {time_series_y.name} | X: {time_series_x.name} | Lags: {lags}]",
+            title=f"Granger Causality Test [Y: {dependent_series.name} | X: {independent_series.name} | Lags: {lags}]",
         )
 
-        result_ftest = round(granger[lags][0]["params_ftest"][1], 3)
+        result_ftest = round(granger_df.loc["params_ftest"]["P-value"], 3)
 
         if result_ftest > confidence_level:
             console.print(
@@ -303,23 +298,23 @@ def display_granger(
         else:
             console.print(
                 f"As the p-value of the F-test is {result_ftest}, we can reject the null hypothesis at "
-                f"the {confidence_level} confidence level and find the Series '{time_series_x.name}' "
-                f"to Granger-cause the Series '{time_series_y.name}'\n"
+                f"the {confidence_level} confidence level and find the Series '{independent_series.name}' "
+                f"to Granger-cause the Series '{dependent_series.name}'\n"
             )
 
         export_data(
             export,
             os.path.dirname(os.path.abspath(__file__)),
-            f'{time_series_y.name.replace(".","-")}_{time_series_x.name.replace(".","-")}_granger',
+            f'{dependent_series.name.replace(".","-")}_{independent_series.name.replace(".","-")}_granger',
             granger_df,
         )
 
 
 @log_start_end(log=logger)
 def display_cointegration_test(
-    datasets: Dict[pd.Series, Any],
+    *datasets: pd.Series,
     significant: bool = False,
-    plot: bool = False,
+    plot: bool = True,
     export: str = "",
     external_axes: Optional[List[plt.axes]] = None,
 ):
@@ -342,8 +337,8 @@ def display_cointegration_test(
 
     Parameters
     ----------
-    datasets: Dict[pd.Series, Any]
-        All time series to perform co-integration tests on.
+    datasets: pd.Series
+        Variable number of series to test for cointegration
     significant: float
         Show only companies that have p-values lower than this percentage
     plot: bool
@@ -353,76 +348,45 @@ def display_cointegration_test(
     external_axes:Optional[List[plt.axes]]
         External axes to plot on
     """
+    if len(datasets) < 2:
+        console.print("[red]Co-integration requires at least two time series.[/red]")
+        return
 
-    pairs = list(combinations(datasets.keys(), 2))
-    result: Dict[str, list] = dict()
-    z_values: Dict[str, pd.Series] = dict()
+    df: pd.DataFrame = econometrics_model.get_coint_df(*datasets)
 
-    for x, y in pairs:
-        if sum(datasets[y].isnull()) > 0:
-            console.print(
-                f"The Series {y} has nan-values. Please consider dropping or filling these "
-                f"values with 'clean'."
-            )
-        elif sum(datasets[x].isnull()) > 0:
-            console.print(
-                f"The Series {x} has nan-values. Please consider dropping or filling these "
-                f"values with 'clean'."
-            )
-        elif not datasets[y].index.equals(datasets[x].index):
-            console.print(f"The Series {y} and {x} do not have the same index.")
+    if significant:
+        console.print(
+            f"Only showing pairs that are statistically significant ({significant} > p-value)."
+        )
+        df = df[significant > df["P Value"]]
+        console.print()
+
+    print_rich_table(
+        df,
+        headers=list(df.columns),
+        show_index=True,
+        index_name="Pairs",
+        title="Cointegration Tests",
+    )
+
+    if plot:
+        if external_axes is None:
+            _, ax = plt.subplots(figsize=plot_autoscale(), dpi=PLOT_DPI)
         else:
-            (
-                c,
-                gamma,
-                alpha,
-                z,
-                adfstat,
-                pvalue,
-            ) = econometrics_model.get_engle_granger_two_step_cointegration_test(
-                datasets[x], datasets[y]
-            )
-            result[f"{x}/{y}"] = [c, gamma, alpha, adfstat, pvalue]
-            z_values[f"{x}/{y}"] = z
+            ax = external_axes[0]
 
-    if result and z_values:
-        df = pd.DataFrame.from_dict(
-            result,
-            orient="index",
-            columns=["Constant", "Gamma", "Alpha", "Dickey-Fuller", "P Value"],
-        )
+        z_values = econometrics_model.get_coint_df(*datasets, return_z=True)
 
-        if significant:
-            console.print(
-                f"Only showing pairs that are statistically significant ({significant} > p-value)."
-            )
-            df = df[significant > df["P Value"]]
-            console.print()
+        for pair, values in z_values.items():
+            ax.plot(values, label=pair)
 
-        print_rich_table(
-            df,
-            headers=list(df.columns),
-            show_index=True,
-            index_name="Pairs",
-            title="Cointegration Tests",
-        )
+        ax.legend()
+        ax.set_title("Error correction terms")
 
-        if plot:
-            if external_axes is None:
-                _, ax = plt.subplots(figsize=plot_autoscale(), dpi=PLOT_DPI)
-            else:
-                ax = external_axes[0]
+        theme.style_primary_axis(ax)
 
-            for pair, values in z_values.items():
-                ax.plot(values, label=pair)
-
-            ax.legend()
-            ax.set_title("Error correction terms")
-
-            theme.style_primary_axis(ax)
-
-            if external_axes is None:
-                theme.visualize_output()
+        if external_axes is None:
+            theme.visualize_output()
 
         export_data(
             export,

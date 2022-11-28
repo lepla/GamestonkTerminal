@@ -11,7 +11,8 @@ rm -rf build/terminal && rm -rf dist && rm -rf DMG
 # Clean up local logging id
 rm -rf openbb_terminal/logs
 
-pyinstaller build/pyinstaller/terminal.spec
+# Running build
+pyinstaller build/pyinstaller/terminal.spec --clean
 
 # Assign icons to the built folder and launcher
 osascript build/pyinstaller/setup_icons.applescript

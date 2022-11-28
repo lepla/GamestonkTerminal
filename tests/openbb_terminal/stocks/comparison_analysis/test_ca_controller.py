@@ -18,7 +18,7 @@ DF_EMPTY = pd.DataFrame()
 @pytest.mark.parametrize(
     "queue, expected",
     [
-        (["historical", "help"], []),
+        (["historical", "help"], ["help"]),
         (["q", ".."], [".."]),
     ],
 )
@@ -72,7 +72,7 @@ def test_menu_without_queue_completion(mocker):
         queue=None,
     ).menu()
 
-    assert result_menu == []
+    assert result_menu == ["help"]
 
 
 @pytest.mark.vcr(record_mode="none")
@@ -120,7 +120,7 @@ def test_menu_without_queue_sys_exit(mock_input, mocker):
         queue=None,
     ).menu()
 
-    assert result_menu == []
+    assert result_menu == ["help"]
 
 
 @pytest.mark.vcr(record_mode="none")
@@ -170,9 +170,10 @@ def test_call_cls(mocker):
                 "quit",
                 "quit",
                 "quit",
+                "quit",
             ],
         ),
-        ("call_exit", ["help"], ["quit", "quit", "quit", "help"]),
+        ("call_exit", ["help"], ["quit", "quit", "quit", "quit", "help"]),
         ("call_home", [], ["quit", "quit"]),
         ("call_help", [], []),
         ("call_quit", [], ["quit"]),
@@ -238,8 +239,8 @@ def test_call_func_expect_queue(expected_queue, queue, func):
                 "--export=csv",
             ],
             dict(
-                similar_tickers=["MOCK_SIMILAR_1", "MOCK_SIMILAR_2"],
-                start="2020-12-01",
+                similar=["MOCK_SIMILAR_1", "MOCK_SIMILAR_2"],
+                start_date="2020-12-01",
                 candle_type="h",
                 normalize=False,
                 export="csv",
@@ -253,8 +254,8 @@ def test_call_func_expect_queue(expected_queue, queue, func):
                 "--start=2020-12-01",
             ],
             dict(
-                similar_tickers=["MOCK_SIMILAR_1", "MOCK_SIMILAR_2"],
-                start="2020-12-01",
+                similar=["MOCK_SIMILAR_1", "MOCK_SIMILAR_2"],
+                start_date="2020-12-01",
                 candle_type="h",
                 export="",
                 display_full_matrix=False,
@@ -269,8 +270,8 @@ def test_call_func_expect_queue(expected_queue, queue, func):
                 "--export=csv",
             ],
             dict(
-                similar_tickers=["MOCK_SIMILAR_1", "MOCK_SIMILAR_2"],
-                start="2020-12-01",
+                similar=["MOCK_SIMILAR_1", "MOCK_SIMILAR_2"],
+                start_date="2020-12-01",
                 export="csv",
             ),
         ),
@@ -282,9 +283,10 @@ def test_call_func_expect_queue(expected_queue, queue, func):
                 "--timeframe=MOCK_TIMEFRAME",
             ],
             dict(
-                similar=["MOCK_SIMILAR_1", "MOCK_SIMILAR_2"],
+                symbols=["MOCK_SIMILAR_1", "MOCK_SIMILAR_2"],
                 timeframe="MOCK_TIMEFRAME",
                 quarter=True,
+                export="",
             ),
         ),
         (
@@ -296,9 +298,10 @@ def test_call_func_expect_queue(expected_queue, queue, func):
                 "--export=csv",
             ],
             dict(
-                similar=["MOCK_SIMILAR_1", "MOCK_SIMILAR_2"],
+                symbols=["MOCK_SIMILAR_1", "MOCK_SIMILAR_2"],
                 timeframe="MOCK_TIMEFRAME",
                 quarter=True,
+                export="csv",
             ),
         ),
         (
@@ -310,9 +313,10 @@ def test_call_func_expect_queue(expected_queue, queue, func):
                 "--export=csv",
             ],
             dict(
-                similar=["MOCK_SIMILAR_1", "MOCK_SIMILAR_2"],
+                symbols=["MOCK_SIMILAR_1", "MOCK_SIMILAR_2"],
                 timeframe="MOCK_TIMEFRAME",
                 quarter=True,
+                export="csv",
             ),
         ),
         (
@@ -446,9 +450,7 @@ def test_call_func(tested_func, mocked_func, other_args, called_with, mocker):
     "func",
     [
         "call_ticker",
-        "call_getpoly",
-        "call_getfinnhub",
-        "call_getfinviz",
+        "call_get",
         "call_set",
         "call_add",
         "call_rmv",
@@ -501,19 +503,19 @@ def test_call_ticker(mocker):
     "tested_func, mocked_func, other_args",
     [
         (
-            "call_getfinviz",
+            "call_get",
             "finviz_compare_model.get_similar_companies",
-            ["--nocountry"],
+            ["--nocountry", "--source=Finviz"],
         ),
         (
-            "call_getpoly",
+            "call_get",
             "polygon_model.get_similar_companies",
-            ["--us_only"],
+            ["--us_only", "--source=Polygon"],
         ),
         (
-            "call_getfinnhub",
+            "call_get",
             "finnhub_model.get_similar_companies",
-            [],
+            ["--source=Finnhub"],
         ),
     ],
 )
@@ -521,8 +523,7 @@ def test_func_calling_get_similar_companies(
     tested_func, mocked_func, other_args, mocker
 ):
     similar = ["MOCK_SIMILAR_" + str(i) for i in range(11)]
-    user = "MOCK_USER"
-    mock = mocker.Mock(return_value=(similar, user))
+    mock = mocker.Mock(return_value=similar)
     target = "openbb_terminal.stocks.comparison_analysis." + mocked_func
     mocker.patch(target=target, new=mock)
 
@@ -532,25 +533,9 @@ def test_func_calling_get_similar_companies(
 
 
 @pytest.mark.vcr(record_mode="none")
-def test_call_po(mocker):
-    similar = ["MOCK_SIMILAR_1", "MOCK_SIMILAR_2"]
-    mock = mocker.Mock(return_value=["MOCK_SIMILAR", "MOCK_USER"])
-    target = "openbb_terminal.portfolio.portfolio_optimization.po_controller.PortfolioOptimizationController.menu"
-    mocker.patch(target=target, new=mock)
-
-    controller = ca_controller.ComparisonAnalysisController(similar=similar)
-    controller.call_po([])
-    mock.assert_called_once()
-
-    controller = ca_controller.ComparisonAnalysisController()
-    controller.call_po([])
-    assert controller.queue == []
-
-
-@pytest.mark.vcr(record_mode="none")
 def test_call_tsne(mocker):
     similar = ["MOCK_SIMILAR"]
-    mock = mocker.Mock(return_value=["MOCK_SIMILAR", "MOCK_USER"])
+    mock = mocker.Mock(return_value=pd.DataFrame())
     target = "openbb_terminal.stocks.comparison_analysis.yahoo_finance_model.get_sp500_comps_tsne"
     mocker.patch(target=target, new=mock)
 
@@ -563,10 +548,8 @@ def test_call_tsne(mocker):
         ]
     )
     mock.assert_called_once_with(
-        "MOCK_SIMILAR",
+        symbol="MOCK_SIMILAR",
         lr=100,
-        no_plot=True,
-        num_tickers=5,
     )
 
 

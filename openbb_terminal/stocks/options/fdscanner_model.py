@@ -2,6 +2,7 @@
 __docformat__ = "numpy"
 
 import logging
+from typing import Tuple
 
 import numpy as np
 import pandas as pd
@@ -15,22 +16,25 @@ logger = logging.getLogger(__name__)
 
 
 @log_start_end(log=logger)
-def unusual_options(num: int):
+def unusual_options(limit: int = 100) -> Tuple[pd.DataFrame, pd.Timestamp]:
     """Get unusual option activity from fdscanner.com
 
     Parameters
     ----------
-    num: int
+    limit: int
         Number to show
 
     Returns
     -------
-    df: pd.DataFrame
-        Dataframe containing options information
-    last_updated: pd.Timestamp
-        Timestamp indicated when data was updated from website
+    Tuple[pd.DataFrame, pd.Timestamp]
+        Dataframe containing options information, Timestamp indicated when data was updated from website
+
+    Examples
+    --------
+    >>> from openbb_terminal.sdk import openbb
+    >>> unu_df = openbb.stocks.options.unu()
     """
-    pages = np.arange(0, num // 20 + 1)
+    pages = np.arange(0, limit // 20 + 1)
     data_list = []
     for page_num in pages:
 

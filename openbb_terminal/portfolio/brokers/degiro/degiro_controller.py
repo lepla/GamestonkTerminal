@@ -1,14 +1,18 @@
 # IMPORTATION STANDARD
 import argparse
+import datetime
 import logging
 from typing import List
 
-# IMPORTATION THIRDPARTY
-from prompt_toolkit.completion import NestedCompleter
+from openbb_terminal.custom_prompt_toolkit import NestedCompleter
 
 # IMPORTATION INTERNAL
 from openbb_terminal import feature_flags as obbff
 from openbb_terminal.decorators import log_start_end
+from openbb_terminal.helper_funcs import (
+    EXPORT_ONLY_RAW_DATA_ALLOWED,
+    valid_date,
+)
 from openbb_terminal.menu import session
 from openbb_terminal.parent_classes import BaseController
 from openbb_terminal.portfolio.brokers.degiro.degiro_view import DegiroView
@@ -31,6 +35,7 @@ class DegiroController(BaseController):
         "pending",
         "topnews",
         "update",
+        "paexport",
     ]
     PATH = "/portfolio/bro/degiro/"
 
@@ -42,6 +47,54 @@ class DegiroController(BaseController):
 
         if session and obbff.USE_PROMPT_TOOLKIT:
             choices: dict = {c: {} for c in self.controller_choices}
+
+            zero_to_hundred: dict = {str(c): {} for c in range(0, 100)}
+
+            choices["login"] = {
+                "--one-time-password": None,
+                "-otp": "--one-time-password",
+            }
+            choices["lookup"] = {
+                "--limit": None,
+                "-l": "--limit",
+                "--offset": zero_to_hundred,
+                "-o": "--offset",
+            }
+            choices["create"] = {
+                "--action": {c: {} for c in DegiroView.ORDER_ACTION},
+                "-a": "--action",
+                "--product": None,
+                "-prod": "--product",
+                "--symbol": None,
+                "-sym": "--symbol",
+                "--price": None,
+                "-p": "--price",
+                "--size": None,
+                "-s": "--size",
+                "--up-to": None,
+                "-up": "--up-to",
+                "--duration": {c: {} for c in DegiroView.ORDER_DURATION},
+                "-d": "--duration",
+                "--type": {c: {} for c in DegiroView.ORDER_TYPE},
+                "-t": "--type",
+            }
+            choices["update"] = {
+                "--price": None,
+                "-p": "--price",
+            }
+            choices["lastnews"] = {
+                "--limit": None,
+                "-l": "--limit",
+            }
+            choices["paexport"] = {
+                "--start": None,
+                "-s": "--start",
+                "--end": None,
+                "-e": "--end",
+                "--currency": None,
+                "-c": "--currency",
+            }
+
             self.completer = NestedCompleter.from_nested_dict(choices)
 
     def print_help(self):
@@ -55,7 +108,7 @@ class DegiroController(BaseController):
         # PARSE ARGS
         parser = argparse.ArgumentParser(
             add_help=False,
-            prog="companynews",
+            prog="cancel",
         )
         parser.add_argument(
             "id",
@@ -76,13 +129,53 @@ class DegiroController(BaseController):
             prog="companynews",
         )
         parser.add_argument(
-            "isin",
+            "-s",
+            "--symbol",
             type=str,
             help="ISIN code of the company.",
+            required="-h" not in other_args,
+            action="store",
+            dest="symbol",
+        )
+        parser.add_argument(
+            "-l",
+            "--limit",
+            type=int,
+            default=10,
+            help="Number of news to display.",
+            required=False,
+            action="store",
+            dest="limit",
+        )
+        parser.add_argument(
+            "-o",
+            "--offset",
+            type=int,
+            default=0,
+            help="Offset of news to display.",
+            required=False,
+            action="store",
+            dest="offset",
+        )
+        parser.add_argument(
+            "-lang",
+            "--languages",
+            type=str,
+            default="en,fr",
+            help="Languages of news to display.",
+            required=False,
+            action="store",
+            dest="languages",
         )
         ns_parser = self.parse_known_args_and_warn(parser, other_args)
 
-        self.__degiro_view.companynews(ns_parser=ns_parser)
+        if ns_parser:
+            self.__degiro_view.companynews(
+                symbol=ns_parser.symbol,
+                limit=ns_parser.limit,
+                offset=ns_parser.offset,
+                languages=ns_parser.languages,
+            )
 
     @log_start_end(log=logger)
     def call_create(self, other_args: List[str]):
@@ -206,10 +299,18 @@ class DegiroController(BaseController):
             add_help=False,
             prog="login",
         )
+        parser.add_argument(
+            "-otp",
+            "--one-time-password",
+            default=None,
+            help="One-time-password for 2FA.",
+            required=False,
+            type=int,
+        )
         ns_parser = self.parse_known_args_and_warn(parser, other_args)
 
         if ns_parser:
-            self.__degiro_view.login()
+            self.__degiro_view.login(otp=ns_parser.one_time_password)
 
     @log_start_end(log=logger)
     def call_logout(self, other_args: List[str]):
@@ -307,3 +408,44 @@ class DegiroController(BaseController):
         ns_parser = self.parse_known_args_and_warn(parser, other_args)
 
         self.__degiro_view.update(ns_parser=ns_parser)
+
+    @log_start_end(log=logger)
+    def call_paexport(self, other_args: List[str]):
+        """Export transactions for Portfolio menu into csv format. The transactions
+        file is exported to the portfolio/holdings folder and can be loaded directly
+        in the Portfolio menu."""
+
+        # PARSING ARGS
+        parser = argparse.ArgumentParser(
+            add_help=False,
+            prog="paexport",
+        )
+        parser.add_argument(
+            "-s",
+            "--start",
+            help="Start date.",
+            required=True,
+            type=valid_date,
+        )
+        parser.add_argument(
+            "-e",
+            "--end",
+            help="End date.",
+            type=valid_date,
+            default=datetime.datetime.now(),
+        )
+        parser.add_argument(
+            "-c",
+            "--currency",
+            help="Used currency.",
+            default="USD",
+            type=str,
+        )
+        ns_parser = self.parse_known_args_and_warn(
+            parser,
+            other_args,
+            export_allowed=EXPORT_ONLY_RAW_DATA_ALLOWED,
+        )
+
+        if ns_parser:
+            self.__degiro_view.transactions_export(ns_parser=ns_parser)

@@ -1,5 +1,4 @@
 # IMPORTATION STANDARD
-import datetime
 
 # IMPORTATION THIRDPARTY
 import pytest
@@ -34,8 +33,8 @@ def test_output(func, kwargs_dict, recorder):
 @pytest.mark.parametrize(
     "func, kwargs_dict",
     [
-        ("get_series_notes", {"series_term": "finance"}),
-        ("get_series_data", {"series_id": "DGS10", "start": "2020-01-01"}),
+        ("get_series_notes", {"search_query": "finance"}),
+        ("get_series_data", {"series_id": "DGS10", "start_date": "2020-01-01"}),
     ],
 )
 def test_check_output(func, kwargs_dict, recorder):
@@ -73,7 +72,7 @@ def test_invalid_response_status(func, kwargs_dict, mocker):
 @pytest.mark.vcr
 @pytest.mark.parametrize(
     "func, kwargs_dict",
-    [("get_series_data", {"series_id": "DGS10", "start": "2020-01-01"})],
+    [("get_series_data", {"series_id": "DGS10", "start_date": "2020-01-01"})],
 )
 def test_load_data(func, kwargs_dict, recorder):
     result_df = getattr(fred_model, func)(**kwargs_dict)
@@ -84,20 +83,20 @@ def test_load_data(func, kwargs_dict, recorder):
 
 @pytest.mark.skip(reason="Date needs to be mocked.")
 @pytest.mark.vcr
-@pytest.mark.parametrize("date", [datetime.datetime(2022, 3, 21, 0, 0)])
+@pytest.mark.parametrize("date", ["2022-03-21"])
 def test_yield_curve(date, recorder):
     result_df, returned_date = fred_model.get_yield_curve(date)
-    assert date.strftime("%Y-%m-%d") == returned_date.strftime("%Y-%m-%d")
+    assert date == returned_date
     assert not result_df.empty
     recorder.capture(result_df)
 
 
 @pytest.mark.skip(reason="Date needs to be mocked.")
 @pytest.mark.vcr
-@pytest.mark.parametrize("date", [datetime.datetime(2021, 7, 17, 0, 0)])
+@pytest.mark.parametrize("date", ["2021-07-17"])
 def test_yield_curve_weekend(date):
     result_df, returned_date = fred_model.get_yield_curve(date)
-    assert date.strftime("%Y-%m-%d") == returned_date
+    assert date == returned_date
     assert result_df.empty
 
 

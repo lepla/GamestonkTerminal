@@ -7,6 +7,7 @@ import pytest
 
 # IMPORTATION INTERNAL
 from openbb_terminal.stocks import stocks_controller
+from tests.test_helpers import no_dfs
 
 # pylint: disable=E1101
 # pylint: disable=W0603
@@ -58,7 +59,7 @@ def vcr_config():
 @pytest.mark.parametrize(
     "queue, expected",
     [
-        (["load", "help"], []),
+        (["load", "help"], ["help"]),
         (["quit", "help"], ["help"]),
     ],
 )
@@ -108,7 +109,7 @@ def test_menu_without_queue_completion(mocker):
 
     result_menu = stocks_controller.StocksController(queue=None).menu()
 
-    assert result_menu == []
+    assert result_menu == ["help"]
 
 
 @pytest.mark.vcr(record_mode="none")
@@ -152,7 +153,7 @@ def test_menu_without_queue_sys_exit(mock_input, mocker):
 
     result_menu = stocks_controller.StocksController(queue=None).menu()
 
-    assert result_menu == []
+    assert result_menu == ["help"]
 
 
 @pytest.mark.vcr(record_mode="none")
@@ -250,7 +251,7 @@ def test_call_func_expect_queue(expected_queue, func, queue):
             [
                 "--query=mock_query",
                 "--limit=1",
-                "--export=''",
+                "--export=csv",
             ],
             "stocks_helper.search",
             [],
@@ -261,13 +262,20 @@ def test_call_func_expect_queue(expected_queue, func, queue):
                 sector="",
                 industry="",
                 exchange_country="",
-                export="",
+                export="csv",
             ),
         ),
         (
             "call_quote",
             [],
-            "stocks_helper.quote",
+            "stocks_view.display_quote",
+            [],
+            dict(),
+        ),
+        (
+            "call_tob",
+            ["--ticker=AAPL"],
+            "cboe_view.display_top_of_book",
             [],
             dict(),
         ),
@@ -276,7 +284,7 @@ def test_call_func_expect_queue(expected_queue, func, queue):
             [
                 "--plotly",
                 "--sort=Open",
-                "--descending",
+                "--reverse",
                 "--raw",
                 "--limit=1",
                 "--trend",
@@ -285,10 +293,10 @@ def test_call_func_expect_queue(expected_queue, func, queue):
             "qa_view.display_raw",
             [],
             dict(
-                df=EMPTY_DF,
-                sort="Open",
-                des=False,
-                num=1,
+                data=EMPTY_DF,
+                sortby="Open",
+                ascend=False,
+                limit=1,
             ),
         ),
         (
@@ -296,7 +304,7 @@ def test_call_func_expect_queue(expected_queue, func, queue):
             [
                 "--plotly",
                 "--sort=Open",
-                "--descending",
+                "--reverse",
                 "--limit=1",
                 "--trend",
                 "--ma=20,30",
@@ -304,30 +312,13 @@ def test_call_func_expect_queue(expected_queue, func, queue):
             "stocks_helper.display_candle",
             [],
             dict(
-                s_ticker="MOCK_TICKER",
-                df_stock=EMPTY_DF,
+                symbol="MOCK_TICKER",
+                data=EMPTY_DF,
                 use_matplotlib=False,
                 intraday=False,
                 add_trend=True,
                 ma=[20, 30],
-            ),
-        ),
-        (
-            "call_news",
-            [
-                "--limit=1",
-                "--date=2022-01-07",
-                "--oldest",
-                "--sources=MOCK_SOURCE_1,MOCK_SOURCE_2",
-            ],
-            "newsapi_view.display_news",
-            [],
-            dict(
-                term="MOCK_TICKER",
-                num=1,
-                s_from="2022-01-07",
-                show_newest=False,
-                sources="MOCK_SOURCE_1,MOCK_SOURCE_2.com",
+                yscale="linear",
             ),
         ),
         (
@@ -473,7 +464,7 @@ def test_call_func(
 
         getattr(controller, tested_func)(other_args)
 
-        if called_args or called_kwargs:
+        if called_args or called_kwargs and no_dfs(called_args, called_kwargs):
             mock.assert_called_once_with(*called_args, **called_kwargs)
         else:
             mock.assert_called_once()
@@ -513,14 +504,12 @@ def test_call_func_no_parser(func, mocker):
     "func",
     [
         "call_candle",
-        "call_news",
         "call_res",
         "call_dd",
         "call_fa",
         "call_bt",
         "call_ta",
         "call_qa",
-        "call_pred",
     ],
 )
 def test_call_func_no_ticker(func, mocker):

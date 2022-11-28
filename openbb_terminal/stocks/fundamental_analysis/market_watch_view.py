@@ -78,6 +78,9 @@ def income(other_args: List[str], ticker: str):
         return
 
     df_financials = mwm.prepare_df_financials(ticker, "income", ns_parser.b_quarter)
+    if len(df_financials) == 0 or df_financials.empty:
+        console.print("Marketwatch does not yet provide financials for this ticker")
+        return
 
     if rich_config.USE_COLOR:
         df_financials = df_financials.applymap(lambda_financials_colored_values)
@@ -90,7 +93,6 @@ def income(other_args: List[str], ticker: str):
         console.print("Marketwatch does not yet provide financials for this ticker")
     else:
         console.print(df_financials.to_string(index=False))
-    console.print("")
 
 
 @log_start_end(log=logger)
@@ -155,6 +157,9 @@ def balance(other_args: List[str], ticker: str):
         return
 
     df_financials = mwm.prepare_df_financials(ticker, "balance", ns_parser.b_quarter)
+    if len(df_financials) == 0 or df_financials.empty:
+        console.print("Marketwatch does not yet provide financials for this ticker")
+        return
 
     if rich_config.USE_COLOR:
         df_financials = df_financials.applymap(lambda_financials_colored_values)
@@ -167,7 +172,6 @@ def balance(other_args: List[str], ticker: str):
         console.print("Marketwatch does not yet provide financials for this ticker")
     else:
         console.print(df_financials.to_string(index=False))
-    console.print("")
 
 
 @log_start_end(log=logger)
@@ -228,6 +232,9 @@ def cash(other_args: List[str], ticker: str):
         return
 
     df_financials = mwm.prepare_df_financials(ticker, "cashflow", ns_parser.b_quarter)
+    if len(df_financials) == 0 or df_financials.empty:
+        console.print("Marketwatch does not yet provide financials for this ticker")
+        return
 
     if rich_config.USE_COLOR:
         df_financials = df_financials.applymap(lambda_financials_colored_values)
@@ -240,24 +247,23 @@ def cash(other_args: List[str], ticker: str):
         console.print("Marketwatch does not yet provide financials for this ticker")
     else:
         console.print(df_financials.to_string(index=False))
-    console.print("")
 
 
 @log_start_end(log=logger)
-def display_sean_seah_warnings(ticker: str, debug: bool = False):
+def display_sean_seah_warnings(symbol: str, debug: bool = False):
     """Display Sean Seah warnings
 
     Parameters
     ----------
     other_args : List[str]
         argparse other args
-    ticker : str
+    symbol : str
         Stock ticker
     """
-    financials, warnings, debugged_warnings = mwm.get_sean_seah_warnings(ticker, debug)
+    financials, warnings, debugged_warnings = mwm.get_sean_seah_warnings(symbol, debug)
 
     if financials.empty:
-        console.print(f"No financials found for {ticker}\n")
+        console.print(f"No financials found for {symbol}\n")
         return
 
     print_rich_table(
@@ -268,7 +274,7 @@ def display_sean_seah_warnings(ticker: str, debug: bool = False):
     )
 
     if not warnings:
-        console.print("No warnings found.  Good stonk")
+        console.print("No warnings found. Good stonk")
         return
 
     messages = (
@@ -278,4 +284,4 @@ def display_sean_seah_warnings(ticker: str, debug: bool = False):
     )
 
     console.print("Warnings:\n")
-    console.print("\n".join(messages), "\n")
+    console.print("\n".join(messages))

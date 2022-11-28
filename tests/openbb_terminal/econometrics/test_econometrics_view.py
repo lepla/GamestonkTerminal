@@ -2,7 +2,8 @@
 import pytest
 
 # IMPORTATION INTERNAL
-from openbb_terminal.econometrics import econometrics_model, econometrics_view
+from openbb_terminal.econometrics import econometrics_view
+from openbb_terminal.common import common_model
 
 
 @pytest.mark.vcr()
@@ -12,11 +13,9 @@ from openbb_terminal.econometrics import econometrics_model, econometrics_view
     [
         (
             {
-                "heart": econometrics_model.load(
-                    "heart", ["csv", "xlsx"], {}, {"heart": "heart"}
-                ),
-                "macrodata": econometrics_model.load(
-                    "macrodata", ["csv", "xlsx"], {}, {"macrodata": "macrodata"}
+                "heart": common_model.load("heart", {}, {"heart": "heart"}),
+                "macrodata": common_model.load(
+                    "macrodata", {}, {"macrodata": "macrodata"}
                 ),
             },
             None,
@@ -27,31 +26,26 @@ def test_show_options(datasets, dataset_name):
     econometrics_view.show_options(datasets=datasets, dataset_name=dataset_name)
 
 
+@pytest.mark.skip
 @pytest.mark.vcr()
 @pytest.mark.record_stdout
 @pytest.mark.parametrize(
     "data, dataset, column, plot",
     [
         (
-            econometrics_model.load(
-                "sunspots", ["csv", "xlsx"], {}, {"sunspots": "sunspots"}
-            )["SUNACTIVITY"],
+            common_model.load("sunspots", {}, {"sunspots": "sunspots"})["SUNACTIVITY"],
             "Sunset",
             "Sunactivity",
             False,
         ),
         (
-            econometrics_model.load(
-                "macrodata", ["csv", "xlsx"], {}, {"macrodata": "macrodata"}
-            )["infl"],
+            common_model.load("macrodata", {}, {"macrodata": "macrodata"})["infl"],
             "Macrodata",
             "Inflation",
             False,
         ),
         (
-            econometrics_model.load(
-                "elnino", ["csv", "xlsx"], {}, {"elnino": "elnino"}
-            )["JAN"],
+            common_model.load("elnino", {}, {"elnino": "elnino"})["JAN"],
             "El Nino",
             "January",
             False,
@@ -68,57 +62,47 @@ def test_display_norm(data, dataset, column, plot):
     "df, dataset_name, column_name, fuller_reg, kpss_reg",
     [
         (
-            econometrics_model.load(
-                "sunspots", ["csv", "xlsx"], {}, {"sunspots": "sunspots"}
-            )["SUNACTIVITY"],
+            common_model.load("sunspots", {}, {"sunspots": "sunspots"})["SUNACTIVITY"],
             "Sunspot",
             "Sunactivity",
             "c",
             "c",
         ),
         (
-            econometrics_model.load(
-                "sunspots", ["csv", "xlsx"], {}, {"sunspots": "sunspots"}
-            )["SUNACTIVITY"],
+            common_model.load("sunspots", {}, {"sunspots": "sunspots"})["SUNACTIVITY"],
             "Sunspot",
             "Sunactivity",
             "c",
             "ct",
         ),
         (
-            econometrics_model.load(
-                "sunspots", ["csv", "xlsx"], {}, {"sunspots": "sunspots"}
-            )["SUNACTIVITY"],
+            common_model.load("sunspots", {}, {"sunspots": "sunspots"})["SUNACTIVITY"],
             "Sunspot",
             "Sunactivity",
             "ct",
             "c",
         ),
         (
-            econometrics_model.load(
-                "sunspots", ["csv", "xlsx"], {}, {"sunspots": "sunspots"}
-            )["SUNACTIVITY"],
+            common_model.load("sunspots", {}, {"sunspots": "sunspots"})["SUNACTIVITY"],
             "Sunspot",
             "Sunactivity",
             "ctt",
             "c",
         ),
         (
-            econometrics_model.load(
-                "sunspots", ["csv", "xlsx"], {}, {"sunspots": "sunspots"}
-            )["SUNACTIVITY"],
+            common_model.load("sunspots", {}, {"sunspots": "sunspots"})["SUNACTIVITY"],
             "Sunspot",
             "Sunactivity",
-            "nc",
+            "n",
             "c",
         ),
     ],
 )
 def test_display_root(df, dataset_name, column_name, fuller_reg, kpss_reg):
     econometrics_view.display_root(
-        df=df,
-        dataset_name=dataset_name,
-        column_name=column_name,
+        data=df,
+        dataset=dataset_name,
+        column=column_name,
         fuller_reg=fuller_reg,
         kpss_reg=kpss_reg,
     )
@@ -130,32 +114,20 @@ def test_display_root(df, dataset_name, column_name, fuller_reg, kpss_reg):
     "time_series_y, time_series_x, lags, confidence_level",
     [
         (
-            econometrics_model.load(
-                "macrodata", ["csv", "xlsx"], {}, {"macrodata": "macrodata"}
-            )["realgdp"],
-            econometrics_model.load(
-                "macrodata", ["csv", "xlsx"], {}, {"macrodata": "macrodata"}
-            )["pop"],
+            common_model.load("macrodata", {}, {"macrodata": "macrodata"})["realgdp"],
+            common_model.load("macrodata", {}, {"macrodata": "macrodata"})["pop"],
             3,
             0.05,
         ),
         (
-            econometrics_model.load(
-                "macrodata", ["csv", "xlsx"], {}, {"macrodata": "macrodata"}
-            )["realgovt"],
-            econometrics_model.load(
-                "macrodata", ["csv", "xlsx"], {}, {"macrodata": "macrodata"}
-            )["realinv"],
+            common_model.load("macrodata", {}, {"macrodata": "macrodata"})["realgovt"],
+            common_model.load("macrodata", {}, {"macrodata": "macrodata"})["realinv"],
             2,
             0.10,
         ),
         (
-            econometrics_model.load(
-                "macrodata", ["csv", "xlsx"], {}, {"macrodata": "macrodata"}
-            )["realdpi"],
-            econometrics_model.load(
-                "macrodata", ["csv", "xlsx"], {}, {"macrodata": "macrodata"}
-            )["cpi"],
+            common_model.load("macrodata", {}, {"macrodata": "macrodata"})["realdpi"],
+            common_model.load("macrodata", {}, {"macrodata": "macrodata"})["cpi"],
             1,
             0.01,
         ),
@@ -163,8 +135,8 @@ def test_display_root(df, dataset_name, column_name, fuller_reg, kpss_reg):
 )
 def test_display_granger(time_series_y, time_series_x, lags, confidence_level):
     econometrics_view.display_granger(
-        time_series_y=time_series_y,
-        time_series_x=time_series_x,
+        dependent_series=time_series_y,
+        independent_series=time_series_x,
         lags=lags,
         confidence_level=confidence_level,
     )
@@ -176,38 +148,34 @@ def test_display_granger(time_series_y, time_series_x, lags, confidence_level):
     "datasets, significant, plot",
     [
         (
-            {
-                "y": econometrics_model.load(
+            [
+                common_model.load(
                     "interest_inflation",
-                    ["csv", "xlsx"],
                     {},
                     {"interest_inflation": "interest_inflation"},
                 )["Dp"],
-                "x": econometrics_model.load(
+                common_model.load(
                     "interest_inflation",
-                    ["csv", "xlsx"],
                     {},
                     {"interest_inflation": "interest_inflation"},
                 )["R"],
-            },
+            ],
             True,
             False,
         ),
         (
-            {
-                "y": econometrics_model.load(
+            [
+                common_model.load(
                     "interest_inflation",
-                    ["csv", "xlsx"],
                     {},
                     {"interest_inflation": "interest_inflation"},
                 )["Dp"],
-                "x": econometrics_model.load(
+                common_model.load(
                     "interest_inflation",
-                    ["csv", "xlsx"],
                     {},
                     {"interest_inflation": "interest_inflation"},
                 )["R"],
-            },
+            ],
             False,
             False,
         ),
@@ -215,5 +183,5 @@ def test_display_granger(time_series_y, time_series_x, lags, confidence_level):
 )
 def test_get_engle_granger_two_step_cointegration_test(datasets, significant, plot):
     econometrics_view.display_cointegration_test(
-        datasets=datasets, significant=significant, plot=plot
+        *datasets, significant=significant, plot=plot
     )

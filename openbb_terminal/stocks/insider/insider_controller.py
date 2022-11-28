@@ -4,18 +4,12 @@ __docformat__ = "numpy"
 import argparse
 import configparser
 import logging
-import os
 from typing import List
-
 import pandas as pd
-from prompt_toolkit.completion import NestedCompleter
-
+from openbb_terminal.custom_prompt_toolkit import NestedCompleter
 from openbb_terminal import feature_flags as obbff
 from openbb_terminal.decorators import log_start_end
-from openbb_terminal.helper_funcs import (
-    EXPORT_ONLY_RAW_DATA_ALLOWED,
-    check_positive,
-)
+from openbb_terminal.helper_funcs import EXPORT_ONLY_RAW_DATA_ALLOWED, check_positive
 from openbb_terminal.menu import session
 from openbb_terminal.parent_classes import StockBaseController
 from openbb_terminal.rich_config import console, MenuText
@@ -23,11 +17,10 @@ from openbb_terminal.stocks.insider import (
     businessinsider_view,
     finviz_view,
     openinsider_view,
+    openinsider_model,
 )
 
 logger = logging.getLogger(__name__)
-
-presets_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), "presets/")
 
 # pylint: disable=,inconsistent-return-statements
 
@@ -69,12 +62,10 @@ class InsiderController(StockBaseController):
         "stats",
     ]
 
-    preset_choices = [
-        preset.split(".")[0]
-        for preset in os.listdir(presets_path)
-        if preset[-4:] == ".ini"
-    ]
+    preset_choices = openinsider_model.get_preset_choices()
+
     PATH = "/stocks/ins/"
+    CHOICES_GENERATION = True
 
     def __init__(
         self,
@@ -94,9 +85,8 @@ class InsiderController(StockBaseController):
         self.preset = "whales"
 
         if session and obbff.USE_PROMPT_TOOLKIT:
-            choices: dict = {c: {} for c in self.controller_choices}
-            choices["view"] = {c: None for c in self.preset_choices}
-            choices["set"] = {c: None for c in self.preset_choices}
+            choices: dict = self.choices_default
+
             self.completer = NestedCompleter.from_nested_dict(choices)
 
     def print_help(self):
@@ -107,36 +97,37 @@ class InsiderController(StockBaseController):
         mt.add_raw("\n")
         mt.add_param("_preset", self.preset)
         mt.add_raw("\n")
-        mt.add_cmd("filter", "Open Insider")
-        mt.add_raw("\n\n")
-        mt.add_param("_ticker", self.ticker)
-        mt.add_raw("\n")
-        mt.add_cmd("stats", "Open Insider", self.ticker)
-        mt.add_cmd("act", "Business Insider", self.ticker)
-        mt.add_cmd("lins", "Finviz", self.ticker)
+        mt.add_cmd("filter")
         mt.add_raw("\n")
         mt.add_info("_last_insiders")
-        mt.add_cmd("lcb", "Open Insider")
-        mt.add_cmd("lpsb", "Open Insider")
-        mt.add_cmd("lit", "Open Insider")
-        mt.add_cmd("lip", "Open Insider")
-        mt.add_cmd("blip", "Open Insider")
-        mt.add_cmd("blop", "Open Insider")
-        mt.add_cmd("bclp", "Open Insider")
-        mt.add_cmd("lis", "Open Insider")
-        mt.add_cmd("blis", "Open Insider")
-        mt.add_cmd("blos", "Open Insider")
-        mt.add_cmd("blcs", "Open Insider")
+        mt.add_cmd("lcb")
+        mt.add_cmd("lpsb")
+        mt.add_cmd("lit")
+        mt.add_cmd("lip")
+        mt.add_cmd("blip")
+        mt.add_cmd("blop")
+        mt.add_cmd("bclp")
+        mt.add_cmd("lis")
+        mt.add_cmd("blis")
+        mt.add_cmd("blos")
+        mt.add_cmd("blcs")
+        mt.add_raw("\n")
         mt.add_info("_top_insiders")
-        mt.add_cmd("topt", "Open Insider")
-        mt.add_cmd("toppw", "Open Insider")
-        mt.add_cmd("toppm", "Open Insider")
-        mt.add_cmd("tipt", "Open Insider")
-        mt.add_cmd("tippw", "Open Insider")
-        mt.add_cmd("tippm", "Open Insider")
-        mt.add_cmd("tist", "Open Insider")
-        mt.add_cmd("tispw", "Open Insider")
-        mt.add_cmd("tispm", "Open Insider")
+        mt.add_cmd("topt")
+        mt.add_cmd("toppw")
+        mt.add_cmd("toppm")
+        mt.add_cmd("tipt")
+        mt.add_cmd("tippw")
+        mt.add_cmd("tippm")
+        mt.add_cmd("tist")
+        mt.add_cmd("tispw")
+        mt.add_cmd("tispm")
+        mt.add_raw("\n")
+        mt.add_param("_ticker", self.ticker)
+        mt.add_raw("\n")
+        mt.add_cmd("stats", self.ticker)
+        mt.add_cmd("act", self.ticker)
+        mt.add_cmd("lins", self.ticker)
         console.print(text=mt.menu_text, menu="Stocks - Insider Trading")
 
     def custom_reset(self):
@@ -162,6 +153,7 @@ class InsiderController(StockBaseController):
             help="View specific preset",
             default="",
             choices=self.preset_choices,
+            metavar="Desired preset",
         )
 
         if other_args and "-" not in other_args[0][0]:
@@ -171,7 +163,7 @@ class InsiderController(StockBaseController):
             if ns_parser.preset:
                 preset_filter = configparser.RawConfigParser()
                 preset_filter.optionxform = str  # type: ignore
-                preset_filter.read(presets_path + ns_parser.preset + ".ini")
+                preset_filter.read(self.preset_choices[ns_parser.preset])
 
                 filters_headers = [
                     "General",
@@ -197,7 +189,7 @@ class InsiderController(StockBaseController):
             else:
                 for preset in self.preset_choices:
                     with open(
-                        presets_path + preset + ".ini",
+                        self.preset_choices[preset],
                         encoding="utf8",
                     ) as f:
                         description = ""
@@ -205,7 +197,7 @@ class InsiderController(StockBaseController):
                             if line.strip() == "[General]":
                                 break
                             description += line.strip()
-                    console.print(f"\nPRESET: {preset}")
+                    console.print(f"\nPRESET: {preset.strip('.ini')}")
                     console.print(
                         description.split("Description: ")[1].replace("#", "")
                     )
@@ -228,6 +220,7 @@ class InsiderController(StockBaseController):
             default="template",
             help="Filter presets",
             choices=self.preset_choices,
+            metavar="Desired preset",
         )
         if other_args and "-" not in other_args[0][0]:
             other_args.insert(0, "-p")
@@ -269,8 +262,8 @@ class InsiderController(StockBaseController):
         )
         if ns_parser:
             openinsider_view.print_insider_filter(
-                preset_loaded=self.preset,
-                ticker="",
+                preset=self.preset,
+                symbol="",
                 limit=ns_parser.limit,
                 links=ns_parser.urls,
                 export=ns_parser.export,
@@ -283,7 +276,7 @@ class InsiderController(StockBaseController):
             add_help=False,
             formatter_class=argparse.ArgumentDefaultsHelpFormatter,
             prog="stats",
-            description="Print open insider filtered data using selected ticker. [Source: OpenInsider]",
+            description="Open insider filtered data using selected ticker. [Source: OpenInsider]",
         )
         parser.add_argument(
             "-l",
@@ -310,8 +303,8 @@ class InsiderController(StockBaseController):
         if ns_parser:
             if self.ticker:
                 openinsider_view.print_insider_filter(
-                    preset_loaded="",
-                    ticker=self.ticker,
+                    preset="",
+                    symbol=self.ticker,
                     limit=ns_parser.limit,
                     links=ns_parser.urls,
                     export=ns_parser.export,
@@ -888,15 +881,6 @@ class InsiderController(StockBaseController):
             description="""Prints insider activity over time [Source: Business Insider]""",
         )
         parser.add_argument(
-            "-l",
-            "--limit",
-            action="store",
-            dest="limit",
-            type=check_positive,
-            default=10,
-            help="Limit of latest insider activity.",
-        )
-        parser.add_argument(
             "--raw",
             action="store_true",
             default=False,
@@ -906,16 +890,16 @@ class InsiderController(StockBaseController):
         if other_args and "-" not in other_args[0][0]:
             other_args.insert(0, "-l")
         ns_parser = self.parse_known_args_and_warn(
-            parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED
+            parser, other_args, EXPORT_ONLY_RAW_DATA_ALLOWED, limit=10
         )
         if ns_parser:
             if self.ticker:
                 businessinsider_view.insider_activity(
-                    stock=self.stock,
-                    ticker=self.ticker,
-                    start=self.start,
+                    data=self.stock,
+                    symbol=self.ticker,
+                    start_date=self.start,
                     interval=self.interval,
-                    num=ns_parser.limit,
+                    limit=ns_parser.limit,
                     raw=ns_parser.raw,
                     export=ns_parser.export,
                 )
@@ -950,8 +934,8 @@ class InsiderController(StockBaseController):
         if ns_parser:
             if self.ticker:
                 finviz_view.last_insider_activity(
-                    ticker=self.ticker,
-                    num=ns_parser.limit,
+                    symbol=self.ticker,
+                    limit=ns_parser.limit,
                     export=ns_parser.export,
                 )
             else:

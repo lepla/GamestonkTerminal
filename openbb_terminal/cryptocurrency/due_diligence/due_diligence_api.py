@@ -10,7 +10,6 @@ from .glassnode_view import display_non_zero_addresses as nonzero
 from .glassnode_view import display_active_addresses as active
 from .glassnode_view import display_exchange_net_position_change as change
 from .glassnode_view import display_exchange_balances as eb
-from .glassnode_view import display_btc_rainbow as btcrb
 from .glassnode_view import display_hashrate as hr
 from .coinglass_view import display_open_interest as oi
 from .pycoingecko_view import display_info as info
@@ -35,6 +34,22 @@ from .coinpaprika_view import display_events as events
 from .coinpaprika_view import display_twitter as twitter
 from .santiment_view import display_github_activity as gh
 from .cryptopanic_view import display_news as news
+from .messari_view import display_messari_timeseries_list as get_mt
+from .messari_view import display_messari_timeseries as mt
+from .messari_view import display_marketcap_dominance as mcapdom
+from .messari_view import display_links as links
+from .messari_view import display_roadmap as rm
+from .messari_view import display_tokenomics as tk
+from .messari_view import display_project_info as pi
+from .messari_view import display_investors as inv
+from .messari_view import display_team as team
+from .messari_view import display_governance as gov
+from .messari_view import display_fundraising as fr
+from .tokenterminal_view import (
+    display_fundamental_metric_from_project_over_time as funot,
+    display_description as desc,
+)
+
 
 # Models
 models = _models(os.path.abspath(os.path.dirname(__file__)))

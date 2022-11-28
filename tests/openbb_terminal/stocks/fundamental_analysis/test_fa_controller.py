@@ -16,7 +16,7 @@ from openbb_terminal.stocks.fundamental_analysis import fa_controller
 @pytest.mark.parametrize(
     "queue, expected",
     [
-        (["load", "help"], []),
+        (["load", "help"], ["help"]),
         (["quit", "help"], ["help"]),
     ],
 )
@@ -72,7 +72,7 @@ def test_menu_without_queue_completion(mocker):
         ticker="TSLA", start="10/25/2021", interval="1440min", suffix="", queue=None
     ).menu()
 
-    assert result_menu == []
+    assert result_menu == ["help"]
 
 
 @pytest.mark.vcr(record_mode="none")
@@ -119,7 +119,7 @@ def test_menu_without_queue_sys_exit(mock_input, mocker):
         ticker="TSLA", start="10/25/2021", interval="1440min", suffix="", queue=None
     ).menu()
 
-    assert result_menu == []
+    assert result_menu == ["help"]
 
 
 @pytest.mark.vcr(record_mode="none")
@@ -225,24 +225,24 @@ def test_call_func_expect_queue(expected_queue, queue, func):
         (
             "call_analysis",
             "eclect_us_view.display_analysis",
-            [],
-            {"TSLA"},
+            ["--export=csv"],
+            dict(symbol="TSLA", export="csv"),
         ),
         (
             "call_mgmt",
             "business_insider_view.display_management",
             ["--export=csv"],
-            {"ticker": "TSLA", "export": "csv"},
+            {"symbol": "TSLA", "export": "csv"},
         ),
         (
             "call_data",
             "finviz_view.display_screen_data",
-            [],
-            {"TSLA"},
+            ["--export=csv"],
+            dict(symbol="TSLA", export="csv"),
         ),
         (
             "call_score",
-            "financial_modeling_prep.fmp_view.valinvest_score",
+            "fmp_view.valinvest_score",
             [],
             {"TSLA"},
         ),
@@ -301,34 +301,190 @@ def test_call_func_expect_queue(expected_queue, queue, func):
             {"TSLA"},
         ),
         (
+            "call_key",
+            "av_view.display_key",
+            ["--export=xlsx"],
+            dict(symbol="TSLA", export="xlsx"),
+        ),
+        (
             "call_income",
             "av_view.display_income_statement",
-            ["--export=csv", "--limit=5", "--quarter"],
-            {"ticker": "TSLA", "limit": 5, "quarterly": True, "export": "csv"},
+            ["--source=AlphaVantage", "--export=csv", "--limit=5"],
+            dict(
+                symbol="TSLA",
+                limit=5,
+                quarterly=False,
+                ratios=False,
+                plot=[],
+                export="csv",
+            ),
+        ),
+        (
+            "call_income",
+            "polygon_view.display_fundamentals",
+            ["--source=Polygon", "--export=csv", "--limit=5"],
+            dict(
+                symbol="TSLA",
+                statement="income",
+                limit=5,
+                quarterly=False,
+                ratios=False,
+                plot=[],
+                export="csv",
+            ),
+        ),
+        (
+            "call_income",
+            "fmp_view.display_income_statement",
+            ["--source=FinancialModelingPrep", "--export=csv", "--limit=5"],
+            dict(
+                symbol="TSLA",
+                limit=5,
+                quarterly=False,
+                ratios=False,
+                plot=[],
+                export="csv",
+            ),
+        ),
+        (
+            "call_income",
+            "yahoo_finance_view.display_fundamentals",
+            ["--source=YahooFinance", "--export=csv", "--limit=5"],
+            dict(
+                symbol="TSLA",
+                statement="financials",
+                ratios=False,
+                plot=[],
+                export="csv",
+                limit=5,
+            ),
         ),
         (
             "call_balance",
             "av_view.display_balance_sheet",
-            ["--export=csv", "--limit=5", "--quarter"],
-            {"ticker": "TSLA", "limit": 5, "quarterly": True, "export": "csv"},
+            ["--source=AlphaVantage", "--export=csv", "--limit=5"],
+            dict(
+                symbol="TSLA",
+                limit=5,
+                quarterly=False,
+                ratios=False,
+                plot=[],
+                export="csv",
+            ),
+        ),
+        (
+            "call_balance",
+            "polygon_view.display_fundamentals",
+            ["--source=Polygon", "--export=csv", "--limit=5"],
+            dict(
+                symbol="TSLA",
+                statement="balance",
+                limit=5,
+                quarterly=False,
+                ratios=False,
+                plot=[],
+                export="csv",
+            ),
+        ),
+        (
+            "call_balance",
+            "fmp_view.display_balance_sheet",
+            ["--source=FinancialModelingPrep", "--export=csv", "--limit=5"],
+            dict(
+                symbol="TSLA",
+                limit=5,
+                quarterly=False,
+                ratios=False,
+                plot=[],
+                export="csv",
+            ),
+        ),
+        (
+            "call_balance",
+            "yahoo_finance_view.display_fundamentals",
+            ["--source=YahooFinance", "--export=csv", "--limit=5"],
+            dict(
+                symbol="TSLA",
+                statement="balance-sheet",
+                ratios=False,
+                plot=[],
+                export="csv",
+                limit=5,
+            ),
         ),
         (
             "call_cash",
             "av_view.display_cash_flow",
-            ["--export=csv", "--limit=5", "--quarter"],
-            {"ticker": "TSLA", "limit": 5, "quarterly": True, "export": "csv"},
+            ["--source=AlphaVantage", "--export=csv", "--limit=5"],
+            dict(
+                symbol="TSLA",
+                limit=5,
+                quarterly=False,
+                ratios=False,
+                plot=[],
+                export="csv",
+            ),
+        ),
+        (
+            "call_cash",
+            "fmp_view.display_cash_flow",
+            ["--source=FinancialModelingPrep", "--export=csv", "--limit=5"],
+            dict(
+                symbol="TSLA",
+                limit=5,
+                quarterly=False,
+                ratios=False,
+                plot=[],
+                export="csv",
+            ),
+        ),
+        (
+            "call_cash",
+            "polygon_view.display_fundamentals",
+            ["--source=Polygon", "--export=csv", "--limit=5"],
+            dict(
+                symbol="TSLA",
+                statement="cash",
+                limit=5,
+                quarterly=False,
+                ratios=False,
+                plot=[],
+                export="csv",
+            ),
+        ),
+        (
+            "call_cash",
+            "yahoo_finance_view.display_fundamentals",
+            ["--source=YahooFinance", "--export=csv", "--limit=5"],
+            dict(
+                symbol="TSLA",
+                statement="cash-flow",
+                ratios=False,
+                plot=[],
+                export="csv",
+                limit=5,
+            ),
         ),
         (
             "call_earnings",
             "av_view.display_earnings",
-            ["--limit=5", "--quarter", "--export=csv"],
-            {"ticker": "TSLA", "limit": 5, "quarterly": True, "export": "csv"},
+            ["--limit=5", "--quarter", "--export=csv", "--source=AlphaVantage"],
+            dict(
+                symbol="TSLA",
+                limit=5,
+                quarterly=True,
+                export="csv",
+            ),
         ),
         (
             "call_fraud",
-            "fa_controller.av_view.display_fraud",
-            [],
-            {"TSLA"},
+            "av_view.display_fraud",
+            ["--export=csv"],
+            dict(
+                symbol="TSLA",
+                export="csv",
+                detail=False,
+            ),
         ),
         (
             "call_dcf",
@@ -340,7 +496,7 @@ def test_call_func_expect_queue(expected_queue, queue, func):
             "call_warnings",
             "market_watch_view.display_sean_seah_warnings",
             ["--debug"],
-            {"ticker": "TSLA", "debug": True},
+            {"symbol": "TSLA", "debug": True},
         ),
     ],
 )
@@ -356,6 +512,7 @@ def test_call_func(tested_func, mocked_func, other_args, called_with, mocker):
         interval="1440min",
         suffix="",
     )
+
     getattr(fa, tested_func)(other_args=other_args)
 
     if isinstance(called_with, dict):
@@ -407,28 +564,6 @@ def test_call_func_no_parser(func, mocker):
     func_result = getattr(controller, func)(other_args=list())
     assert func_result is None
     controller.parse_known_args_and_warn.assert_called_once()
-
-
-@pytest.mark.vcr(record_mode="none")
-def test_call_fmp(mocker):
-    mocker.patch(
-        (
-            "openbb_terminal.stocks.fundamental_analysis.financial_modeling_prep."
-            "fmp_controller.FinancialModelingPrepController.menu"
-        ),
-        return_value=["quit"],
-    )
-
-    controller = fa_controller.FundamentalAnalysisController(
-        ticker="AAPL",
-        start="10/25/2021",
-        interval="1440min",
-        suffix="",
-    )
-
-    mocker.patch.object(controller, "print_help", autospec=True)
-    controller.call_fmp(list())
-    assert controller.queue == ["quit"]
 
 
 @pytest.mark.vcr(record_mode="none")

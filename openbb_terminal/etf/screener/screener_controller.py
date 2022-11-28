@@ -5,15 +5,13 @@ __docformat__ = "numpy"
 import argparse
 import configparser
 import logging
-import os
 from typing import List
 
-from prompt_toolkit.completion import NestedCompleter
-
 from openbb_terminal import feature_flags as obbff
+from openbb_terminal.custom_prompt_toolkit import NestedCompleter
 from openbb_terminal.decorators import log_start_end
 from openbb_terminal.etf import financedatabase_model, financedatabase_view
-from openbb_terminal.etf.screener import screener_view
+from openbb_terminal.etf.screener import screener_view, screener_model
 from openbb_terminal.helper_funcs import (
     EXPORT_ONLY_RAW_DATA_ALLOWED,
     check_positive,
@@ -23,8 +21,6 @@ from openbb_terminal.parent_classes import BaseController
 from openbb_terminal.rich_config import console, MenuText
 
 logger = logging.getLogger(__name__)
-
-presets_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), "presets/")
 
 
 class ScreenerController(BaseController):
@@ -37,10 +33,8 @@ class ScreenerController(BaseController):
         "sbc",
     ]
 
-    presets_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), "presets/")
-    preset_choices = [
-        f.split(".")[0] for f in os.listdir(presets_path) if f.endswith(".ini")
-    ]
+    PRESET_CHOICES = screener_model.get_preset_choices()
+    ETF_CATEGORY_LIST = financedatabase_model.get_etfs_categories()
 
     sortby_screen_choices = [
         "Assets",
@@ -60,6 +54,7 @@ class ScreenerController(BaseController):
     ]
 
     PATH = "/etf/scr/"
+    CHOICES_GENERATION = True
 
     def __init__(self, queue: List[str] = None):
         """Constructor"""
@@ -69,14 +64,10 @@ class ScreenerController(BaseController):
         self.screen_tickers: List = list()
 
         if session and obbff.USE_PROMPT_TOOLKIT:
-            choices: dict = {c: {} for c in self.controller_choices}
-            choices["view"] = {c: None for c in self.preset_choices}
-            choices["set"] = {c: None for c in self.preset_choices}
-            choices["sbc"] = {
-                c: None for c in financedatabase_model.get_etfs_categories()
-            }
-
-            choices["support"] = self.SUPPORT_CHOICES
+            choices: dict = self.choices_default
+            choices["view"].update({c: None for c in self.PRESET_CHOICES})
+            choices["set"].update({c: None for c in self.PRESET_CHOICES})
+            choices["sbc"].update({c: None for c in self.ETF_CATEGORY_LIST})
 
             self.completer = NestedCompleter.from_nested_dict(choices)
 
@@ -88,9 +79,9 @@ class ScreenerController(BaseController):
         mt.add_raw("\n")
         mt.add_param("_preset", self.preset)
         mt.add_raw("\n")
-        mt.add_cmd("screen", "StockAnalysis")
+        mt.add_cmd("screen")
         mt.add_raw("\n")
-        mt.add_cmd("sbc", "FinanceDatabase")
+        mt.add_cmd("sbc")
         console.print(text=mt.menu_text, menu="ETF - Screener")
 
     @log_start_end(log=logger)
@@ -109,7 +100,7 @@ class ScreenerController(BaseController):
             type=str,
             help="View specific custom preset",
             default="",
-            choices=self.preset_choices,
+            choices=self.PRESET_CHOICES,
         )
         if other_args and "-" not in other_args[0][0]:
             other_args.insert(0, "-p")
@@ -118,7 +109,7 @@ class ScreenerController(BaseController):
             if ns_parser.preset:
                 preset_filter = configparser.RawConfigParser()
                 preset_filter.optionxform = str  # type: ignore
-                preset_filter.read(presets_path + ns_parser.preset + ".ini")
+                preset_filter.read(self.PRESET_CHOICES[ns_parser.preset])
 
                 headers = [
                     "Price",
@@ -136,8 +127,7 @@ class ScreenerController(BaseController):
                     "YrHigh",
                 ]
 
-                console.print("")
-                for filter_header in headers:
+                for i, filter_header in enumerate(headers):
                     console.print(f" - {filter_header} -")
                     d_filters = {**preset_filter[filter_header]}
                     d_filters = {k: v for k, v in d_filters.items() if v}
@@ -145,13 +135,15 @@ class ScreenerController(BaseController):
                         max_len = len(max(d_filters, key=len))
                         for key, value in d_filters.items():
                             console.print(f"{key}{(max_len-len(key))*' '}: {value}")
-                    console.print("")
+
+                    if i < len(headers) - 1:
+                        console.print("\n")
 
             else:
                 console.print("\nPresets:")
-                for preset in self.preset_choices:
+                for preset in self.PRESET_CHOICES:
                     with open(
-                        presets_path + preset + ".ini",
+                        self.PRESET_CHOICES[preset],
                         encoding="utf8",
                     ) as f:
                         description = ""
@@ -162,7 +154,6 @@ class ScreenerController(BaseController):
                     console.print(
                         f"   {preset}{(30-len(preset)) * ' '}{description.split('Description: ')[1].replace('#', '')}"
                     )
-                console.print("")
 
     @log_start_end(log=logger)
     def call_set(self, other_args: List[str]):
@@ -180,14 +171,13 @@ class ScreenerController(BaseController):
             type=str,
             default="template",
             help="Filter presets",
-            choices=self.preset_choices,
+            choices=self.PRESET_CHOICES,
         )
         if other_args and "-" not in other_args[0][0]:
             other_args.insert(0, "-p")
         ns_parser = self.parse_known_args_and_warn(parser, other_args)
         if ns_parser:
             self.preset = ns_parser.preset
-        console.print("")
 
     @log_start_end(log=logger)
     def call_screen(self, other_args):
@@ -216,11 +206,16 @@ class ScreenerController(BaseController):
             choices=self.sortby_screen_choices,
         )
         parser.add_argument(
-            "-a",
-            "--ascend",
+            "-r",
+            "--reverse",
             action="store_true",
-            help="Flag to sort in ascending order (lowest on top)",
-            dest="ascend",
+            dest="reverse",
+            default=False,
+            help=(
+                "Data is sorted in descending order by default. "
+                "Reverse flag will sort it in an ascending way. "
+                "Only works when raw data is displayed."
+            ),
         )
         if other_args and "-" not in other_args[0][0]:
             other_args.insert(0, "-l")
@@ -232,7 +227,7 @@ class ScreenerController(BaseController):
                 preset=self.preset,
                 num_to_show=ns_parser.limit,
                 sortby=ns_parser.sortby,
-                ascend=ns_parser.ascend,
+                ascend=ns_parser.reverse,
                 export=ns_parser.export,
             )
 
@@ -253,6 +248,8 @@ class ScreenerController(BaseController):
             nargs="+",
             help="Category to look for",
             required="-h" not in other_args,
+            choices=self.ETF_CATEGORY_LIST,
+            metavar="CATEGORY",
         )
         parser.add_argument(
             "-l",
@@ -271,7 +268,7 @@ class ScreenerController(BaseController):
         )
         if ns_parser:
             category = " ".join(ns_parser.category)
-            if category in financedatabase_model.get_etfs_categories():
+            if category in self.ETF_CATEGORY_LIST:
                 financedatabase_view.display_etf_by_category(
                     category=category,
                     limit=ns_parser.limit,
@@ -280,5 +277,5 @@ class ScreenerController(BaseController):
             else:
                 console.print(
                     "The category selected does not exist, choose one from:"
-                    f" {', '.join(financedatabase_model.get_etfs_categories())}\n"
+                    f" {', '.join(self.ETF_CATEGORY_LIST)}\n"
                 )

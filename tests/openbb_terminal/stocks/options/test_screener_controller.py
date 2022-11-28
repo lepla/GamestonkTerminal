@@ -19,7 +19,7 @@ PRICES = pd.DataFrame(data={"Price": [11.0, 12.0], "Chance": [0.2, 0.8]})
 @pytest.mark.parametrize(
     "queue, expected",
     [
-        (["load", "help"], []),
+        (["load", "help"], ["help"]),
         (["quit", "help"], ["help"]),
     ],
 )
@@ -69,7 +69,7 @@ def test_menu_without_queue_completion(mocker):
 
     result_menu = screener_controller.ScreenerController(queue=None).menu()
 
-    assert result_menu == []
+    assert result_menu == ["help"]
 
 
 @pytest.mark.vcr(record_mode="none")
@@ -113,7 +113,7 @@ def test_menu_without_queue_sys_exit(mock_input, mocker):
 
     result_menu = screener_controller.ScreenerController(queue=None).menu()
 
-    assert result_menu == []
+    assert result_menu == ["help"]
 
 
 @pytest.mark.vcr(record_mode="none")
@@ -221,7 +221,7 @@ def test_call_func_expect_queue(expected_queue, func, queue):
         (
             "call_view",
             [
-                "high_IV",
+                "high_IV.ini",
             ],
             "syncretism_view.view_available_presets",
             [],
@@ -230,7 +230,7 @@ def test_call_func_expect_queue(expected_queue, func, queue):
         (
             "call_set",
             [
-                "high_IV",
+                "high_IV.ini",
             ],
             "",
             [],
@@ -239,7 +239,7 @@ def test_call_func_expect_queue(expected_queue, func, queue):
         (
             "call_scr",
             [
-                "high_IV",
+                "high_IV.ini",
                 "--limit=1",
             ],
             "syncretism_view.view_screener_output",
@@ -250,13 +250,6 @@ def test_call_func_expect_queue(expected_queue, func, queue):
             "call_ca",
             [],
             "ca_controller.ComparisonAnalysisController.menu",
-            [],
-            dict(),
-        ),
-        (
-            "call_po",
-            [],
-            "po_controller.PortfolioOptimizationController.menu",
             [],
             dict(),
         ),

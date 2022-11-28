@@ -1,31 +1,29 @@
 """Regression View"""
 __docformat__ = "numpy"
 
-from typing import Optional, List, Tuple, Dict, Any
-import os
 import logging
+import os
+from typing import List, Optional
+
 import pandas as pd
 from matplotlib import pyplot as plt
+import statsmodels
 
 from openbb_terminal.config_plot import PLOT_DPI
-from openbb_terminal.decorators import log_start_end
-from openbb_terminal.helper_funcs import plot_autoscale, export_data
-from openbb_terminal.rich_config import console
-from openbb_terminal.econometrics import regression_model
-from openbb_terminal.helper_funcs import (
-    print_rich_table,
-)
 from openbb_terminal.config_terminal import theme
+from openbb_terminal.decorators import log_start_end
+from openbb_terminal.econometrics import regression_model
+from openbb_terminal.helper_funcs import export_data, plot_autoscale, print_rich_table
+from openbb_terminal.rich_config import console
 
 logger = logging.getLogger(__name__)
 
 
 @log_start_end(log=logger)
 def display_panel(
-    regression_type: str,
-    regression_variables: List[Tuple],
-    data: Dict[str, pd.DataFrame],
-    datasets: Dict[pd.DataFrame, Any],
+    Y: pd.DataFrame,
+    X: pd.DataFrame,
+    regression_type: str = "OLS",
     entity_effects: bool = False,
     time_effects: bool = False,
     export: str = "",
@@ -34,16 +32,15 @@ def display_panel(
 
     Parameters
     ----------
-    regression_type: str
-        The type of regression you wish to execute.
+    data : dict
+        A dictionary containing the datasets.
     regression_variables : list
         The regressions variables entered where the first variable is
         the dependent variable.
-    data : dict
-        A dictionary containing the datasets.
-    datasets: dict
-        A dictionary containing the column and dataset names of
         each column/dataset combination.
+    regression_type: str
+        The type of regression you wish to execute. Choose from:
+        OLS, POLS, RE, BOLS, FE
     entity_effects: bool
         Whether to apply Fixed Effects on entities.
     time_effects: bool
@@ -56,24 +53,20 @@ def display_panel(
     The dataset used, the dependent variable, the independent variable and
     the regression model.
     """
-    (
-        regression_df,
-        dependent,
-        independent,
-        model,
-    ) = regression_model.get_regressions_results(
+    model = regression_model.get_regressions_results(
+        Y,
+        X,
         regression_type,
-        regression_variables,
-        data,
-        datasets,
         entity_effects,
         time_effects,
     )
+    if regression_type != "OLS":
+        console.print(model)
 
     if export:
         results_as_html = model.summary.tables[1].as_html()
         df = pd.read_html(results_as_html, header=0, index_col=0)[0]
-
+        dependent = Y.columns[0]
         export_data(
             export,
             os.path.dirname(os.path.abspath(__file__)),
@@ -81,14 +74,14 @@ def display_panel(
             df,
         )
 
-    return regression_df, dependent, independent, model
+    return model
 
 
 @log_start_end(log=logger)
 def display_dwat(
+    model: statsmodels.regression.linear_model.RegressionResultsWrapper,
     dependent_variable: pd.Series,
-    residual: pd.DataFrame,
-    plot: bool = False,
+    plot: bool = True,
     export: str = "",
     external_axes: Optional[List[plt.axes]] = None,
 ):
@@ -96,10 +89,10 @@ def display_dwat(
 
     Parameters
     ----------
+    model : OLS Model
+        A fit statsmodels OLS model.
     dependent_variable : pd.Series
-        The dependent variable.
-    residual : OLS Model
-        The residual of an OLS model.
+        The dependent variable for plotting
     plot : bool
         Whether to plot the residuals
     export : str
@@ -107,17 +100,17 @@ def display_dwat(
     external_axes: Optional[List[plt.axes]]
         External axes to plot on
     """
-    autocorrelation = regression_model.get_dwat(residual)
+    autocorr = regression_model.get_dwat(model)
 
-    if 1.5 < autocorrelation < 2.5:
+    if 1.5 < autocorr < 2.5:
         console.print(
-            f"The result {autocorrelation} is within the range 1.5 and 2.5 which therefore indicates "
+            f"The result {autocorr} is within the range 1.5 and 2.5 which therefore indicates "
             f"autocorrelation not to be problematic."
         )
     else:
         console.print(
-            f"The result {autocorrelation} is outside the range 1.5 and 2.5 and therefore autocorrelation "
-            f"can be problematic. Please consider lags of the dependent or independent variable."
+            f"The result {autocorr} is outside the range 1.5 and 2.5 and could "
+            f"be problematic. Please consider lags of the dependent or independent variable."
         )
 
     if plot:
@@ -126,7 +119,7 @@ def display_dwat(
         else:
             ax = external_axes[0]
 
-        ax.scatter(dependent_variable, residual)
+        ax.scatter(dependent_variable, model.resid)
         ax.axhline(y=0, color="r", linestyle="-")
         ax.set_ylabel("Residual")
         ax.set_xlabel(dependent_variable.name.capitalize())
@@ -140,36 +133,28 @@ def display_dwat(
         export,
         os.path.dirname(os.path.abspath(__file__)),
         f"{dependent_variable.name}_dwat",
-        autocorrelation,
+        autocorr,
     )
-
-    console.print()
 
 
 @log_start_end(log=logger)
-def display_bgod(model: pd.DataFrame, lags: int, export: str = ""):
+def display_bgod(
+    model: statsmodels.regression.linear_model.RegressionResultsWrapper,
+    lags: int = 3,
+    export: str = "",
+):
     """Show Breusch-Godfrey autocorrelation test
 
     Parameters
     ----------
     model : OLS Model
-        Model containing residual values.
+        OLS model that has been fit.
     lags : int
         The amount of lags included.
     export : str
         Format to export data
     """
-    (
-        lm_stat,
-        p_value,
-        f_stat,
-        fp_value,
-    ) = regression_model.get_bgod(model, lags)
-
-    df = pd.DataFrame(
-        [lm_stat, p_value, f_stat, fp_value],
-        index=["LM-stat", "p-value", "f-stat", "fp-value"],
-    )
+    df = regression_model.get_bgod(model, lags)
 
     print_rich_table(
         df,
@@ -177,11 +162,11 @@ def display_bgod(model: pd.DataFrame, lags: int, export: str = ""):
         show_index=True,
         title=f"Breusch-Godfrey autocorrelation test [Lags: {lags}]",
     )
-
+    p_value = df.loc["p-value"][0]
     if p_value > 0.05:
         console.print(
-            f"The result {round(p_value, 2)} indicates the existence of autocorrelation. Consider re-estimating "
-            f"with clustered standard errors and applying the Random Effects or Fixed Effects model."
+            f"{round(p_value, 2)} indicates the autocorrelation. Consider re-estimating with "
+            "clustered standard errors and applying the Random Effects or Fixed Effects model."
         )
     else:
         console.print(
@@ -194,27 +179,20 @@ def display_bgod(model: pd.DataFrame, lags: int, export: str = ""):
 
 
 @log_start_end(log=logger)
-def display_bpag(model: pd.DataFrame, export: str = ""):
+def display_bpag(
+    model: statsmodels.regression.linear_model.RegressionResultsWrapper,
+    export: str = "",
+):
     """Show Breusch-Pagan heteroscedasticity test
 
     Parameters
     ----------
     model : OLS Model
-        Model containing residual values.
+        OLS model that has been fit.
     export : str
         Format to export data
     """
-    (
-        lm_stat,
-        p_value,
-        f_stat,
-        fp_value,
-    ) = regression_model.get_bpag(model)
-
-    df = pd.DataFrame(
-        [lm_stat, p_value, f_stat, fp_value],
-        index=["lm-stat", "p-value", "f-stat", "fp-value"],
-    )
+    df = regression_model.get_bpag(model)
 
     print_rich_table(
         df,
@@ -222,10 +200,10 @@ def display_bpag(model: pd.DataFrame, export: str = ""):
         show_index=True,
         title="Breusch-Pagan heteroscedasticity test",
     )
-
+    p_value = df.loc["p-value"][0]
     if p_value > 0.05:
         console.print(
-            f"The result {round(p_value, 2)} indicates the existence of heteroscedasticity. Consider taking the log "
+            f"{round(p_value, 2)} indicates heteroscedasticity. Consider taking the log "
             f"or a rate for the dependent variable."
         )
     else:

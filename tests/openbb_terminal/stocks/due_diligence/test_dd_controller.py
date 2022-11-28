@@ -17,7 +17,7 @@ from openbb_terminal.stocks.due_diligence import dd_controller
 @pytest.mark.parametrize(
     "queue, expected",
     [
-        (["load", "help"], []),
+        (["load", "help"], ["help"]),
         (["quit", "help"], ["help"]),
     ],
 )
@@ -75,7 +75,7 @@ def test_menu_without_queue_completion(mocker):
         ticker="TSLA", start="10/25/2021", interval="1440min", stock=stock, queue=None
     ).menu()
 
-    assert result_menu == []
+    assert result_menu == ["help"]
 
 
 @pytest.mark.vcr(record_mode="none")
@@ -123,7 +123,7 @@ def test_menu_without_queue_sys_exit(mock_input, mocker):
         ticker="TSLA", start="10/25/2021", interval="1440min", stock=stock, queue=None
     ).menu()
 
-    assert result_menu == []
+    assert result_menu == ["help"]
 
 
 @pytest.mark.vcr(record_mode="none")
@@ -224,36 +224,35 @@ def test_call_func_expect_queue(expected_queue, queue, func):
             "call_analyst",
             "finviz_view.analyst",
             [],
-            {"ticker": "TSLA", "export": ""},
+            {"symbol": "TSLA", "export": ""},
         ),
         (
             "call_analyst",
             "finviz_view.analyst",
             ["--export=csv"],
-            {"ticker": "TSLA", "export": "csv"},
+            {"symbol": "TSLA", "export": "csv"},
         ),
         (
             "call_analyst",
             "finviz_view.analyst",
             ["--export=json"],
-            {"ticker": "TSLA", "export": "json"},
+            {"symbol": "TSLA", "export": "json"},
         ),
         (
             "call_analyst",
             "finviz_view.analyst",
             ["--export=xlsx"],
-            {"ticker": "TSLA", "export": "xlsx"},
+            {"symbol": "TSLA", "export": "xlsx"},
         ),
         (
             "call_pt",
             "business_insider_view.price_target_from_analysts",
             ["--limit=10"],
             {
-                "ticker": "TSLA",
-                "start": "10/25/2021",
-                "interval": "1440min",
-                "stock": None,
-                "num": 10,
+                "symbol": "TSLA",
+                "start_date": "10/25/2021",
+                "data": None,
+                "limit": 10,
                 "raw": False,
                 "export": "",
             },
@@ -263,7 +262,8 @@ def test_call_func_expect_queue(expected_queue, queue, func):
             "business_insider_view.estimates",
             [],
             {
-                "ticker": "TSLA",
+                "symbol": "TSLA",
+                "estimate": "annualearnings",
                 "export": "",
             },
         ),
@@ -272,8 +272,8 @@ def test_call_func_expect_queue(expected_queue, queue, func):
             "finnhub_view.rating_over_time",
             ["--limit=10"],
             {
-                "ticker": "TSLA",
-                "num": 10,
+                "symbol": "TSLA",
+                "limit": 10,
                 "raw": False,
                 "export": "",
             },
@@ -283,8 +283,8 @@ def test_call_func_expect_queue(expected_queue, queue, func):
             "fmp_view.rating",
             ["--limit=10"],
             {
-                "ticker": "TSLA",
-                "num": 10,
+                "symbol": "TSLA",
+                "limit": 10,
                 "export": "",
             },
         ),
@@ -293,8 +293,8 @@ def test_call_func_expect_queue(expected_queue, queue, func):
             "marketwatch_view.sec_filings",
             ["--limit=10"],
             {
-                "ticker": "TSLA",
-                "num": 10,
+                "symbol": "TSLA",
+                "limit": 10,
                 "export": "",
             },
         ),
@@ -303,19 +303,19 @@ def test_call_func_expect_queue(expected_queue, queue, func):
             "csimarket_view.suppliers",
             [],
             {
-                "ticker": "TSLA",
+                "symbol": "TSLA",
                 "export": "",
             },
         ),
         (
             "call_arktrades",
             "ark_view.display_ark_trades",
-            ["--limit=10", "--show_ticker"],
+            ["--limit=10", "--show_symbol"],
             {
-                "ticker": "TSLA",
-                "num": 10,
+                "symbol": "TSLA",
+                "limit": 10,
                 "export": "",
-                "show_ticker": True,
+                "show_symbol": True,
             },
         ),
     ],

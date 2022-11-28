@@ -4,7 +4,7 @@ __docformat__ = "numpy"
 import logging
 from typing import List
 
-from prompt_toolkit.completion import NestedCompleter
+from openbb_terminal.custom_prompt_toolkit import NestedCompleter
 
 from openbb_terminal import feature_flags as obbff
 from openbb_terminal.decorators import log_start_end
@@ -22,14 +22,14 @@ class AlternativeDataController(BaseController):
     CHOICES_COMMANDS: List[str] = []
     CHOICES_MENUS = ["covid", "oss"]
     PATH = "/alternative/"
+    CHOICES_GENERATION = True
 
     def __init__(self, queue: List[str] = None):
         """Constructor"""
         super().__init__(queue)
 
         if session and obbff.USE_PROMPT_TOOLKIT:
-            choices: dict = {c: {} for c in self.controller_choices}
-            choices["support"] = self.SUPPORT_CHOICES
+            choices: dict = self.choices_default
 
             self.completer = NestedCompleter.from_nested_dict(choices)
 

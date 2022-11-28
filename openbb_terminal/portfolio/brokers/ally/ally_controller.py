@@ -5,7 +5,7 @@ import argparse
 import logging
 from typing import List
 
-from prompt_toolkit.completion import NestedCompleter
+from openbb_terminal.custom_prompt_toolkit import NestedCompleter
 
 from openbb_terminal import feature_flags as obbff
 from openbb_terminal.decorators import log_start_end
@@ -33,15 +33,17 @@ class AllyController(BaseController):
         "topgainers",
         "toppctgainers",
     ]
+    list_exchanges = ["A", "N", "Q", "U", "V"]
     PATH = "/portfolio/bro/ally/"
+    CHOICES_GENERATION = True
 
     def __init__(self, queue: List[str] = None):
         """Constructor"""
         super().__init__(queue)
 
         if session and obbff.USE_PROMPT_TOOLKIT:
-            choices: dict = {c: {} for c in self.controller_choices}
-            choices["movers"]["-t"] = {c: None for c in self.list_choices}
+            choices: dict = self.choices_default
+            self.choices = choices
             self.completer = NestedCompleter.from_nested_dict(choices)
 
     def print_help(self):
@@ -160,7 +162,7 @@ class AllyController(BaseController):
             Q:NASDAQ
             U:NASDAQ Bulletin Board
             V:NASDAQ OTC Other""",
-            choices=["A", "N", "Q", "U", "V"],
+            choices=self.list_exchanges,
             default="N",
             dest="exchange",
         )

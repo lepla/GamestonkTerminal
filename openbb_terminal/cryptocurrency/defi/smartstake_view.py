@@ -24,19 +24,17 @@ from openbb_terminal.decorators import log_start_end
 
 logger = logging.getLogger(__name__)
 
-LUNA_CIR_SUPPLY_CHANGE = "lunaSupplyChallengeStats"
-
 
 @log_start_end(log=logger)
 @check_api_key(["API_SMARTSTAKE_KEY", "API_SMARTSTAKE_TOKEN"])
 def display_luna_circ_supply_change(
-    days: int,
+    days: int = 30,
     export: str = "",
-    supply_type: str = LUNA_CIR_SUPPLY_CHANGE,
+    supply_type: str = "lunaSupplyChallengeStats",
     limit: int = 5,
     external_axes: Optional[List[plt.Axes]] = None,
 ):
-    """Display Luna circulating supply stats
+    """Plots and prints table showing Luna circulating supply stats
 
     Parameters
     ----------
@@ -51,9 +49,6 @@ def display_luna_circ_supply_change(
         Default: 5
     external_axes : Optional[List[plt.Axes]], optional
         External axes (1 axis is expected in the list), by default None
-    Returns
-        None
-    -------
     """
 
     df = smartstake_model.get_luna_supply_stats(supply_type, days)

@@ -32,7 +32,7 @@ def vcr_config():
 @pytest.mark.parametrize(
     "queue, expected",
     [
-        (["load", "help"], []),
+        (["load", "help"], ["help"]),
         (["quit", "help"], ["help"]),
     ],
 )
@@ -90,7 +90,7 @@ def test_menu_without_queue_completion(mocker):
         queue=None,
     ).menu()
 
-    assert result_menu == []
+    assert result_menu == ["help"]
 
 
 @pytest.mark.vcr(record_mode="none")
@@ -140,7 +140,7 @@ def test_menu_without_queue_sys_exit(mock_input, mocker):
         queue=None,
     ).menu()
 
-    assert result_menu == []
+    assert result_menu == ["help"]
 
 
 @pytest.mark.vcr(record_mode="none")
@@ -247,7 +247,7 @@ def test_call_func_expect_queue(expected_queue, queue, func):
                 "--export=csv",
             ],
             dict(
-                num_stocks=1,
+                limit=1,
                 export="csv",
             ),
         ),
@@ -259,7 +259,7 @@ def test_call_func_expect_queue(expected_queue, queue, func):
                 "--export=csv",
             ],
             dict(
-                num=1,
+                limit=1,
                 export="csv",
             ),
         ),
@@ -274,7 +274,7 @@ def test_call_func_expect_queue(expected_queue, queue, func):
             ],
             dict(
                 num=1,
-                promising=2,
+                limit=2,
                 tier="T1",
                 export="csv",
             ),
@@ -285,13 +285,13 @@ def test_call_func_expect_queue(expected_queue, queue, func):
             [
                 "--limit=1",
                 "--sort=sv",
-                "--ascending",
+                "--reverse",
                 "--export=csv",
             ],
             dict(
-                num=1,
-                sort_field="sv",
-                ascending=True,
+                limit=1,
+                sortby="sv",
+                ascend=True,
                 export="csv",
             ),
         ),
@@ -304,8 +304,8 @@ def test_call_func_expect_queue(expected_queue, queue, func):
                 "--export=csv",
             ],
             dict(
-                num=1,
-                sort_field="si",
+                limit=1,
+                sortby="si",
                 export="csv",
             ),
         ),
@@ -313,16 +313,17 @@ def test_call_func_expect_queue(expected_queue, queue, func):
             "call_psi",
             "quandl_view.short_interest",
             [
-                "quandl",
+                "MOCK_TICKER",
                 "--nyse",
+                "--source=Quandl",
                 "--limit=1",
                 "--raw",
                 "--export=csv",
             ],
             dict(
-                ticker="MOCK_TICKER",
+                symbol="MOCK_TICKER",
                 nyse=True,
-                days=1,
+                limit=1,
                 raw=True,
                 export="csv",
             ),
@@ -332,13 +333,13 @@ def test_call_func_expect_queue(expected_queue, queue, func):
             "stockgrid_view.short_interest_volume",
             [
                 "--limit=1",
-                "--source=stockgrid",
+                "--source=Stockgrid",
                 "--raw",
                 "--export=csv",
             ],
             dict(
-                ticker="MOCK_TICKER",
-                num=1,
+                symbol="MOCK_TICKER",
+                limit=1,
                 raw=True,
                 export="csv",
             ),
@@ -350,7 +351,7 @@ def test_call_func_expect_queue(expected_queue, queue, func):
                 "--export=csv",
             ],
             dict(
-                ticker="MOCK_TICKER",
+                symbol="MOCK_TICKER",
                 export="csv",
             ),
         ),
@@ -365,11 +366,15 @@ def test_call_func_expect_queue(expected_queue, queue, func):
                 "--export=csv",
             ],
             dict(
-                ticker="MOCK_TICKER",
-                stock=empty_df,
-                start=datetime.strptime("2020-12-01", "%Y-%m-%d"),
-                end=datetime.strptime("2020-12-02", "%Y-%m-%d"),
-                num=1,
+                symbol="MOCK_TICKER",
+                data=empty_df,
+                start_date=datetime.strptime("2020-12-01", "%Y-%m-%d").strftime(
+                    "%Y-%m-%d"
+                ),
+                end_date=datetime.strptime("2020-12-02", "%Y-%m-%d").strftime(
+                    "%Y-%m-%d"
+                ),
+                limit=1,
                 raw=True,
                 export="csv",
             ),
@@ -383,8 +388,8 @@ def test_call_func_expect_queue(expected_queue, queue, func):
                 "--export=csv",
             ],
             dict(
-                ticker="MOCK_TICKER",
-                num=10,
+                symbol="MOCK_TICKER",
+                limit=10,
                 raw=True,
                 export="csv",
             ),
@@ -425,6 +430,8 @@ def test_call_func(tested_func, mocked_func, other_args, called_with, mocker):
     getattr(controller, tested_func)(other_args=other_args)
 
     if isinstance(called_with, dict):
+        if "num" in called_with:
+            called_with["input_limit"] = called_with.pop("num")
         mock.assert_called_once_with(**called_with)
     elif isinstance(called_with, list):
         mock.assert_called_once_with(*called_with)

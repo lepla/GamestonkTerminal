@@ -6,7 +6,8 @@ from typing import List
 import logging
 import matplotlib as mpl
 import pandas as pd
-from prompt_toolkit.completion import NestedCompleter
+
+from openbb_terminal.custom_prompt_toolkit import NestedCompleter
 
 from openbb_terminal import feature_flags as obbff
 from openbb_terminal.helper_funcs import (
@@ -37,8 +38,9 @@ mpl.use(default_backend)
 class BacktestingController(BaseController):
     """Backtesting Controller class"""
 
-    CHOICES_COMMANDS = ["ema", "ema_cross", "rsi", "whatif"]
+    CHOICES_COMMANDS = ["ema", "emacross", "rsi", "whatif"]
     PATH = "/stocks/bt/"
+    CHOICES_GENERATION = True
 
     def __init__(self, ticker: str, stock: pd.DataFrame, queue: List[str] = None):
         """Constructor"""
@@ -48,7 +50,8 @@ class BacktestingController(BaseController):
         self.stock = stock
 
         if session and obbff.USE_PROMPT_TOOLKIT:
-            choices: dict = {c: {} for c in self.controller_choices}
+            choices: dict = self.choices_default
+
             self.completer = NestedCompleter.from_nested_dict(choices)
 
     def print_help(self):
@@ -59,7 +62,7 @@ class BacktestingController(BaseController):
         mt.add_cmd("whatif")
         mt.add_raw("\n")
         mt.add_cmd("ema")
-        mt.add_cmd("ema_cross")
+        mt.add_cmd("emacross")
         mt.add_cmd("rsi")
         console.print(text=mt.menu_text, menu="Stocks - Backtesting")
 
@@ -99,7 +102,7 @@ class BacktestingController(BaseController):
         ns_parser = self.parse_known_args_and_warn(parser, other_args)
         if ns_parser:
             bt_view.display_whatif_scenario(
-                ticker=self.ticker,
+                symbol=self.ticker,
                 num_shares_acquired=ns_parser.num_shares_acquired,
                 date_shares_acquired=ns_parser.date_shares_acquired,
             )
@@ -140,8 +143,8 @@ class BacktestingController(BaseController):
         if ns_parser:
 
             bt_view.display_simple_ema(
-                ticker=self.ticker,
-                df_stock=self.stock,
+                symbol=self.ticker,
+                data=self.stock,
                 ema_length=ns_parser.length,
                 spy_bt=ns_parser.spy,
                 no_bench=ns_parser.no_bench,
@@ -149,12 +152,12 @@ class BacktestingController(BaseController):
             )
 
     @log_start_end(log=logger)
-    def call_ema_cross(self, other_args: List[str]):
+    def call_emacross(self, other_args: List[str]):
         """Call EMA Cross strategy"""
         parser = argparse.ArgumentParser(
             add_help=False,
             formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-            prog="ema_cross",
+            prog="emacross",
             description="Cross between a long and a short Exponential Moving Average.",
         )
         parser.add_argument(
@@ -199,13 +202,12 @@ class BacktestingController(BaseController):
             parser, other_args, export_allowed=EXPORT_ONLY_RAW_DATA_ALLOWED
         )
         if ns_parser:
-
             if ns_parser.long < ns_parser.short:
                 console.print("Short EMA period is longer than Long EMA period\n")
 
-            bt_view.display_ema_cross(
-                ticker=self.ticker,
-                df_stock=self.stock,
+            bt_view.display_emacross(
+                symbol=self.ticker,
+                data=self.stock,
                 short_ema=ns_parser.short,
                 long_ema=ns_parser.long,
                 spy_bt=ns_parser.spy,
@@ -277,8 +279,8 @@ class BacktestingController(BaseController):
                 console.print("Low RSI value is higher than Low RSI value\n")
 
             bt_view.display_rsi_strategy(
-                ticker=self.ticker,
-                df_stock=self.stock,
+                symbol=self.ticker,
+                data=self.stock,
                 periods=ns_parser.periods,
                 low_rsi=ns_parser.low,
                 high_rsi=ns_parser.high,

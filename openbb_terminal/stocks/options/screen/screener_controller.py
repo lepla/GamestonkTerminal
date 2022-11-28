@@ -3,23 +3,17 @@ __docformat__ = "numpy"
 
 import argparse
 import logging
-import os
 from typing import List
 
-from prompt_toolkit.completion import NestedCompleter
-
 from openbb_terminal import feature_flags as obbff
+from openbb_terminal.custom_prompt_toolkit import NestedCompleter
 from openbb_terminal.decorators import log_start_end
-from openbb_terminal.helper_funcs import (
-    EXPORT_ONLY_RAW_DATA_ALLOWED,
-    check_positive,
-)
+from openbb_terminal.helper_funcs import EXPORT_ONLY_RAW_DATA_ALLOWED, check_positive
 from openbb_terminal.menu import session
 from openbb_terminal.parent_classes import BaseController
-from openbb_terminal.portfolio.portfolio_optimization import po_controller
-from openbb_terminal.rich_config import console, MenuText
+from openbb_terminal.rich_config import MenuText, console
 from openbb_terminal.stocks.comparison_analysis import ca_controller
-from openbb_terminal.stocks.options.screen import syncretism_view
+from openbb_terminal.stocks.options.screen import syncretism_model, syncretism_view
 
 # pylint: disable=E1121
 
@@ -33,16 +27,12 @@ class ScreenerController(BaseController):
     CHOICES_COMMANDS = ["view", "set", "scr"]
     CHOICES_MENUS = [
         "ca",
-        "po",
     ]
 
-    presets_path = os.path.join(
-        os.path.abspath(os.path.dirname(__file__)), "..", "presets/"
-    )
-    preset_choices = [
-        f.split(".")[0] for f in os.listdir(presets_path) if f.endswith(".ini")
-    ]
+    preset_choices = syncretism_model.get_preset_choices()
+
     PATH = "/stocks/options/screen/"
+    CHOICES_GENERATION = True
 
     def __init__(self, queue: List[str] = None):
         """Constructor"""
@@ -52,9 +42,8 @@ class ScreenerController(BaseController):
         self.screen_tickers: List = list()
 
         if session and obbff.USE_PROMPT_TOOLKIT:
-            choices: dict = {c: {} for c in self.controller_choices}
-            choices["view"] = {c: None for c in self.preset_choices}
-            choices["set"] = {c: None for c in self.preset_choices}
+            choices: dict = self.choices_default
+
             self.completer = NestedCompleter.from_nested_dict(choices)
 
     def print_help(self):
@@ -70,7 +59,6 @@ class ScreenerController(BaseController):
         mt.add_param("_screened_tickers", ", ".join(self.screen_tickers))
         mt.add_raw("\n")
         mt.add_menu("ca")
-        mt.add_menu("po")
         console.print(text=mt.menu_text, menu="Stocks - Options - Screener")
 
     @log_start_end(log=logger)
@@ -96,14 +84,11 @@ class ScreenerController(BaseController):
         ns_parser = self.parse_known_args_and_warn(parser, other_args)
         if ns_parser:
             if ns_parser.preset:
-                syncretism_view.view_available_presets(
-                    preset=ns_parser.preset, presets_path=self.presets_path
-                )
+                syncretism_view.view_available_presets(preset=ns_parser.preset)
 
             else:
                 for preset in self.preset_choices:
                     console.print(preset)
-                console.print("")
 
     @log_start_end(log=logger)
     def call_set(self, other_args: List[str]):
@@ -128,7 +113,6 @@ class ScreenerController(BaseController):
         ns_parser = self.parse_known_args_and_warn(parser, other_args)
         if ns_parser:
             self.preset = ns_parser.preset
-        console.print("")
 
     @log_start_end(log=logger)
     def call_scr(self, other_args: List[str]):
@@ -171,21 +155,8 @@ class ScreenerController(BaseController):
         if ns_parser:
             self.screen_tickers = syncretism_view.view_screener_output(
                 preset=ns_parser.preset,
-                presets_path=self.presets_path,
-                n_show=ns_parser.limit,
+                limit=ns_parser.limit,
                 export=ns_parser.export,
-            )
-
-    @log_start_end(log=logger)
-    def call_po(self, _):
-        """Call the portfolio optimization menu with selected tickers"""
-        if self.screen_tickers:
-            self.queue = po_controller.PortfolioOptimizationController(
-                self.screen_tickers
-            ).menu(custom_path_menu_above="/portfolio/")
-        else:
-            console.print(
-                "Some tickers must be screened first through one of the presets!\n"
             )
 
     @log_start_end(log=logger)

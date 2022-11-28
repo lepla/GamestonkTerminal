@@ -1,3 +1,5 @@
+import sys
+from typing import Optional
 import logging
 import os
 
@@ -7,6 +9,32 @@ from prompt_toolkit.eventloop.inputhook import set_eventloop_with_inputhook
 from prompt_toolkit.history import FileHistory
 
 logger = logging.getLogger(__name__)
+
+
+# pylint: disable=W0104
+def is_jupyter() -> bool:
+    try:
+        __IPYTHON__  # type: ignore
+        return True
+    except NameError:
+        return False
+
+
+def is_papermill() -> bool:
+    """Check if session is being launched with args '-m ipykernel_launcher',
+    thus coming from papermill Popen. See 'ipykernel_launcher' in reports_model
+    for more detail.
+    """
+
+    return all(
+        i in sys.argv
+        for i in [
+            "-m",
+            "ipykernel_launcher",
+            "-f",
+            "--HistoryManager.hist_file=:memory:",
+        ]
+    )
 
 
 def inputhook(inputhook_context):
@@ -22,12 +50,18 @@ def inputhook(inputhook_context):
 history_file = os.path.join(os.path.expanduser("~"), ".openbb_terminal.his")
 
 try:
-    session = PromptSession(history=FileHistory(history_file))  # type: ignore
-    set_eventloop_with_inputhook(inputhook)
+    if not is_jupyter() and not is_papermill():
+        session: Optional[PromptSession] = PromptSession(
+            history=FileHistory(history_file)
+        )
+        set_eventloop_with_inputhook(inputhook)
+    else:
+        session = None
 # pylint: disable=unused-variable
 except Exception as e:  # noqa: F841
     logger.exception("%s", type(e).__name__)
     print(
-        "WARNING: Prompt toolkit is turned on but did not initialize successfully. Falling back to input()..."
+        "WARNING: Prompt toolkit is turned on but did not initialize successfully."
+        " Falling back to input()..."
     )
     session = None  # type: ignore
